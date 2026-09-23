@@ -12,6 +12,7 @@
   if (!App.sb) { App.auth = { enabled: false }; return; }
   var sb = App.sb;
   var readyCb = null;
+  var recovering = false; // true mientras se está por el link de "olvidé mi contraseña"
 
   function fullScreen(node) {
     document.body.innerHTML = '';
@@ -32,7 +33,9 @@
     var email = ui.input({ type: 'email', placeholder: 'tu@email.com', autocomplete: 'username', inputmode: 'email' });
     var pass = ui.input({ type: 'password', placeholder: 'Contraseña', autocomplete: 'current-password' });
     var err = el('p', { class: 'auth-err', text: msg || '' });
-    var btn = el('button', { class: 'btn btn-primary auth-btn', text: 'Entrar', onclick: submit });
+    // type="submit" implícito: el propio submit del <form> ya llama a submit();
+    // si acá también tuviera onclick, un solo click dispararía el login dos veces.
+    var btn = el('button', { type: 'submit', class: 'btn btn-primary auth-btn', text: 'Entrar' });
 
     var form = el('form', { class: 'auth-form', onsubmit: function (e) { e.preventDefault(); submit(); } }, [
       ui.field('Email', email),
@@ -76,6 +79,41 @@
     ]);
   }
 
+  // Pantalla para elegir nueva contraseña, después de tocar el link de recuperación del mail
+  function recoveryScreen(msg) {
+    var p1 = ui.input({ type: 'password', placeholder: 'Nueva contraseña', autocomplete: 'new-password' });
+    var p2 = ui.input({ type: 'password', placeholder: 'Repetir contraseña', autocomplete: 'new-password' });
+    var err = el('p', { class: 'auth-err', text: msg || '' });
+    var btn = el('button', { type: 'submit', class: 'btn btn-primary auth-btn', text: 'Guardar contraseña' });
+
+    var form = el('form', { class: 'auth-form', onsubmit: function (e) { e.preventDefault(); submit(); } }, [
+      ui.field('Nueva contraseña', p1),
+      ui.field('Repetir contraseña', p2),
+      err,
+      btn,
+      el('p', { class: 'auth-hint', text: 'Elegí una contraseña de 6 caracteres o más.' })
+    ]);
+
+    fullScreen(card([el('h2', { text: 'Elegí tu nueva contraseña' }), form]));
+    setTimeout(function () { p1.focus(); }, 50);
+
+    function submit() {
+      var a = p1.value, b = p2.value;
+      if (!a || a.length < 6) { err.textContent = 'La contraseña tiene que tener 6 caracteres o más.'; return; }
+      if (a !== b) { err.textContent = 'Las contraseñas no coinciden.'; return; }
+      btn.disabled = true; btn.textContent = 'Guardando…'; err.textContent = '';
+      sb.auth.updateUser({ password: a }).then(function (res) {
+        if (res.error) {
+          err.textContent = 'No se pudo cambiar la contraseña: ' + res.error.message;
+          btn.disabled = false; btn.textContent = 'Guardar contraseña';
+          return;
+        }
+        recovering = false;
+        start();
+      });
+    }
+  }
+
   function loadProfile() {
     return sb.auth.getUser().then(function (res) {
       var user = res.data && res.data.user;
@@ -88,14 +126,17 @@
   }
 
   function start() {
+    if (recovering) { recoveryScreen(); return; }
     fullScreen(card([el('h2', { text: 'Cargando…' })]));
     loadProfile().then(function (p) {
+      if (recovering) { recoveryScreen(); return; }
       if (!p) { loginScreen(); return; }
       if (!p.activo) { fullScreen(blockedScreen(p)); return; }
       App.auth.profile = p;
       document.body.innerHTML = '';
       if (readyCb) readyCb(p);
     }).catch(function (e) {
+      if (recovering) { recoveryScreen(); return; }
       console.error('auth start', e);
       fullScreen(errorScreen());
     });
@@ -124,6 +165,7 @@
   };
 
   sb.auth.onAuthStateChange(function (evt) {
+    if (evt === 'PASSWORD_RECOVERY') { recovering = true; recoveryScreen(); return; }
     if (evt === 'SIGNED_OUT') location.reload();
   });
 })();

@@ -946,6 +946,13 @@ details.card[open] > summary { margin-bottom: 10px; }
 
   function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+  // convierte a entero o null (nunca deja NaN guardado, p.ej. si alguien escribe letras en Año/Km)
+  function toIntOrNull(x) {
+    if (x === '' || x == null) return null;
+    var n = parseInt(x, 10);
+    return isNaN(n) ? null : n;
+  }
+
   /* --------------------------- Persistencia ------------------------------- */
   function load() {
     try {
@@ -1079,6 +1086,8 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   function normalizeVehicle(v) {
+    v.anio = toIntOrNull(v.anio);
+    v.km = toIntOrNull(v.km);
     v.fotos = Array.isArray(v.fotos) ? v.fotos : [];
     v.expenses = Array.isArray(v.expenses) ? v.expenses : [];
     v.checklist = v.checklist || {};
@@ -1132,9 +1141,9 @@ details.card[open] > summary { margin-bottom: 10px; }
       id: uid('v'),
       marca: (data.marca || '').trim(),
       modelo: (data.modelo || '').trim(),
-      anio: data.anio ? parseInt(data.anio, 10) : null,
+      anio: toIntOrNull(data.anio),
       patente: (data.patente || '').trim().toUpperCase(),
-      km: data.km != null && data.km !== '' ? parseInt(data.km, 10) : null,
+      km: toIntOrNull(data.km),
       combustible: data.combustible || '',
       caja: data.caja || '',
       version: (data.version || '').trim(),
@@ -1329,9 +1338,9 @@ details.card[open] > summary { margin-bottom: 10px; }
         vehicleId: sale.tradeIn.vehicleId || null,
         marca: (sale.tradeIn.marca || '').trim(),
         modelo: (sale.tradeIn.modelo || '').trim(),
-        anio: sale.tradeIn.anio ? parseInt(sale.tradeIn.anio, 10) : null,
+        anio: toIntOrNull(sale.tradeIn.anio),
         patente: (sale.tradeIn.patente || '').trim().toUpperCase(),
-        km: sale.tradeIn.km ? parseInt(sale.tradeIn.km, 10) : null,
+        km: toIntOrNull(sale.tradeIn.km),
         valor: num(sale.tradeIn.valor),
         moneda: sale.tradeIn.moneda || 'ARS',
         observaciones: (sale.tradeIn.observaciones || '').trim(),
@@ -3504,6 +3513,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   if (!App.sb) { App.auth = { enabled: false }; return; }
   var sb = App.sb;
   var readyCb = null;
+  var recovering = false; // true mientras se está por el link de "olvidé mi contraseña"
 
   function fullScreen(node) {
     document.body.innerHTML = '';
@@ -3524,7 +3534,9 @@ details.card[open] > summary { margin-bottom: 10px; }
     var email = ui.input({ type: 'email', placeholder: 'tu@email.com', autocomplete: 'username', inputmode: 'email' });
     var pass = ui.input({ type: 'password', placeholder: 'Contraseña', autocomplete: 'current-password' });
     var err = el('p', { class: 'auth-err', text: msg || '' });
-    var btn = el('button', { class: 'btn btn-primary auth-btn', text: 'Entrar', onclick: submit });
+    // type="submit" implícito: el propio submit del <form> ya llama a submit();
+    // si acá también tuviera onclick, un solo click dispararía el login dos veces.
+    var btn = el('button', { type: 'submit', class: 'btn btn-primary auth-btn', text: 'Entrar' });
 
     var form = el('form', { class: 'auth-form', onsubmit: function (e) { e.preventDefault(); submit(); } }, [
       ui.field('Email', email),
@@ -3568,6 +3580,41 @@ details.card[open] > summary { margin-bottom: 10px; }
     ]);
   }
 
+  // Pantalla para elegir nueva contraseña, después de tocar el link de recuperación del mail
+  function recoveryScreen(msg) {
+    var p1 = ui.input({ type: 'password', placeholder: 'Nueva contraseña', autocomplete: 'new-password' });
+    var p2 = ui.input({ type: 'password', placeholder: 'Repetir contraseña', autocomplete: 'new-password' });
+    var err = el('p', { class: 'auth-err', text: msg || '' });
+    var btn = el('button', { type: 'submit', class: 'btn btn-primary auth-btn', text: 'Guardar contraseña' });
+
+    var form = el('form', { class: 'auth-form', onsubmit: function (e) { e.preventDefault(); submit(); } }, [
+      ui.field('Nueva contraseña', p1),
+      ui.field('Repetir contraseña', p2),
+      err,
+      btn,
+      el('p', { class: 'auth-hint', text: 'Elegí una contraseña de 6 caracteres o más.' })
+    ]);
+
+    fullScreen(card([el('h2', { text: 'Elegí tu nueva contraseña' }), form]));
+    setTimeout(function () { p1.focus(); }, 50);
+
+    function submit() {
+      var a = p1.value, b = p2.value;
+      if (!a || a.length < 6) { err.textContent = 'La contraseña tiene que tener 6 caracteres o más.'; return; }
+      if (a !== b) { err.textContent = 'Las contraseñas no coinciden.'; return; }
+      btn.disabled = true; btn.textContent = 'Guardando…'; err.textContent = '';
+      sb.auth.updateUser({ password: a }).then(function (res) {
+        if (res.error) {
+          err.textContent = 'No se pudo cambiar la contraseña: ' + res.error.message;
+          btn.disabled = false; btn.textContent = 'Guardar contraseña';
+          return;
+        }
+        recovering = false;
+        start();
+      });
+    }
+  }
+
   function loadProfile() {
     return sb.auth.getUser().then(function (res) {
       var user = res.data && res.data.user;
@@ -3580,14 +3627,17 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   function start() {
+    if (recovering) { recoveryScreen(); return; }
     fullScreen(card([el('h2', { text: 'Cargando…' })]));
     loadProfile().then(function (p) {
+      if (recovering) { recoveryScreen(); return; }
       if (!p) { loginScreen(); return; }
       if (!p.activo) { fullScreen(blockedScreen(p)); return; }
       App.auth.profile = p;
       document.body.innerHTML = '';
       if (readyCb) readyCb(p);
     }).catch(function (e) {
+      if (recovering) { recoveryScreen(); return; }
       console.error('auth start', e);
       fullScreen(errorScreen());
     });
@@ -3616,6 +3666,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   };
 
   sb.auth.onAuthStateChange(function (evt) {
+    if (evt === 'PASSWORD_RECOVERY') { recovering = true; recoveryScreen(); return; }
     if (evt === 'SIGNED_OUT') location.reload();
   });
 })();
@@ -3755,16 +3806,21 @@ details.card[open] > summary { margin-bottom: 10px; }
       if (ops.up[t].length) promises.push(sb.from(t).upsert(ops.up[t], { onConflict: key }));
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
-    if (!promises.length) { shadow = clone(state); return Promise.resolve(); }
+    if (!promises.length) { shadow = clone(state); return Promise.resolve(true); }
 
     return Promise.all(promises).then(function (results) {
       var bad = null;
       results.forEach(function (r) { if (r && r.error) bad = r.error; });
       if (bad) throw bad;
       shadow = clone(state);
+      return true;
     }).catch(function (e) {
       console.error('sync flush', e);
       App.ui && App.ui.toast('No se pudo guardar en la nube. Revisá internet.', 'error');
+      // reintenta solo en unos segundos (por si fue un corte momentáneo de internet)
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(function () { flush(store.getState()); }, 8000);
+      return false;
     });
   }
 
@@ -3779,8 +3835,8 @@ details.card[open] > summary { margin-bottom: 10px; }
     pendingMigration = null;
     applyingRemote = true;
     try { store.hydrate(st); } finally { applyingRemote = false; }
-    return flush(store.getState()).then(function () {
-      App.ui && App.ui.toast('Datos subidos a la nube', 'success');
+    return flush(store.getState()).then(function (ok) {
+      if (ok) App.ui && App.ui.toast('Datos subidos a la nube', 'success');
     });
   }
   function skipMigration() { pendingMigration = null; }
@@ -3968,8 +4024,11 @@ details.card[open] > summary { margin-bottom: 10px; }
       ]
     });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fMarca.value.trim() || !fModelo.value.trim()) { ui.toast('Marca y modelo son obligatorios', 'error'); return; }
+      submitted = true;
       var data = {
         marca: fMarca.value, modelo: fModelo.value, anio: fAnio.value, patente: fPatente.value,
         km: fKm.value, combustible: fComb.value, caja: fCaja.value, version: fVersion.value,
@@ -4054,11 +4113,14 @@ details.card[open] > summary { margin-bottom: 10px; }
     });
     syncForma(); syncCotiz();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de compra', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) {
         ui.toast('Ingresá la cotización del dólar de la compra', 'error'); return;
       }
+      submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
         cotizacionUSD: fCotiz.value,
@@ -4208,7 +4270,9 @@ details.card[open] > summary { margin-bottom: 10px; }
     });
     syncForma(); syncCotiz(); updatePreview();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de venta', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) { ui.toast('Ingresá la cotización del dólar de la venta', 'error'); return; }
       var tradeIn = null;
@@ -4232,6 +4296,7 @@ details.card[open] > summary { margin-bottom: 10px; }
           notas: finNotas.value, cuotas: fc
         };
       }
+      submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value, cotizacionUSD: fCotiz.value,
         formaCobro: fForma.value, montoTransferencia: fTransf.value, montoEfectivo: fEfec.value,
@@ -4284,8 +4349,11 @@ details.card[open] > summary { margin-bottom: 10px; }
     ];
     var m = ui.modal({ title: isEdit ? 'Editar reserva' : 'Reservar vehículo', body: body, footer: footer });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(sena.monto.value) <= 0) { ui.toast('Ingresá el monto de la seña', 'error'); return; }
+      submitted = true;
       store.setReservation(v.id, {
         fecha: fFecha.value, monto: sena.monto.value, moneda: sena.moneda.value, vence: fVence.value,
         cliente: { nombre: fClienteNom.value, telefono: fClienteTel.value },
@@ -4324,8 +4392,11 @@ details.card[open] > summary { margin-bottom: 10px; }
       ]
     });
     syncCotiz();
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto del gasto', 'error'); return; }
+      submitted = true;
       var data = { monto: monto.monto.value, moneda: monto.moneda.value, fecha: fFecha.value, cotizacionUSD: fCotiz.value, observacion: fObs.value };
       if (expense) store.updateExpense(v.id, e.id, data);
       else store.addExpense(v.id, data);
@@ -4391,9 +4462,12 @@ details.card[open] > summary { margin-bottom: 10px; }
     var m = ui.modal({ title: isEdit ? 'Editar gasto del negocio' : 'Nuevo gasto del negocio', body: body, footer: footer });
     sync();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fConcepto.value.trim()) { ui.toast('Poné un concepto', 'error'); return; }
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto', 'error'); return; }
+      submitted = true;
       var data = {
         concepto: fConcepto.value, categoria: fCat.value, monto: monto.monto.value, moneda: monto.moneda.value,
         cotizacionUSD: fCotiz.value, frecuencia: fFrec.value, fecha: fFecha.value, hasta: fHasta.value, notas: fNotas.value
@@ -4454,9 +4528,12 @@ details.card[open] > summary { margin-bottom: 10px; }
 
     var m = ui.modal({ title: isEdit ? 'Editar recordatorio' : 'Nuevo recordatorio', body: body, footer: footer });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fTitulo.value.trim()) { ui.toast('El título es obligatorio', 'error'); return; }
       if (!fFecha.value) { ui.toast('La fecha es obligatoria', 'error'); return; }
+      submitted = true;
       var data = { titulo: fTitulo.value, fecha: fFecha.value, hora: fHora.value, tipo: fTipo.value, nota: fNota.value, repeat: fRepeat.value };
       if (isEdit) { store.updateReminder(r.id, data); ui.toast('Recordatorio actualizado', 'success'); }
       else { store.addReminder(data); ui.toast('Recordatorio creado', 'success'); }
@@ -4704,6 +4781,11 @@ details.card[open] > summary { margin-bottom: 10px; }
   function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
 
   /* --------------------------- FICHA DE VEHÍCULO ---------------------- */
+  // Recuerda la pestaña activa por vehículo entre renders (p.ej. cuando se
+  // registra un pago, o cuando otro usuario cambia algo en tiempo real): sin
+  // esto, cualquier actualización de datos mientras se mira una pestaña que
+  // no sea "Resumen" hacía volver la ficha a "Resumen" sin que el usuario lo pida.
+  var lastDetailTab = { id: null, tab: null };
   function vehicleDetail(root, id) {
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
@@ -4782,9 +4864,12 @@ details.card[open] > summary { margin-bottom: 10px; }
       ['obs', 'Observaciones', function () { return tabObs(v); }],
       ['hist', 'Historial', function () { return tabHist(v); }]
     ];
-    var active = (location.hash.split('?')[1] || '').indexOf('tab=') === 0 ? location.hash.split('tab=')[1] : 'resumen';
+    var hashTab = (location.hash.split('?')[1] || '').indexOf('tab=') === 0 ? location.hash.split('tab=')[1] : null;
+    if (lastDetailTab.id !== id) lastDetailTab = { id: id, tab: hashTab || 'resumen' };
+    var active = lastDetailTab.tab;
     tabs.forEach(function (t) {
       var b = el('button', { class: 'tab' + (t[0] === active ? ' is-active' : ''), text: t[1], onclick: function () {
+        lastDetailTab = { id: id, tab: t[0] };
         ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
         b.classList.add('is-active');
         ui.clear(panel); ui.appendChildren(panel, t[2]());
@@ -5103,15 +5188,20 @@ details.card[open] > summary { margin-bottom: 10px; }
 
   /* --------- Aviso de copia de seguridad (barra en Inicio) --------- */
   function backupBar() {
+    var online = !!(App.auth && App.auth.enabled);
     var last = store.getState().meta.lastBackupAt;
     var excelOn = false;
     try { excelOn = !!(App.excel && App.excel.status && App.excel.status().on); } catch (e) {}
     var dias = last ? Math.floor((Date.now() - last) / 86400000) : null;
     var txt, cls, ico;
     if (excelOn) { txt = 'Se está guardando solo en Excel'; cls = 'is-ok'; ico = '✅'; }
+    // en modo online los datos ya viven en la nube (Supabase): no hace falta
+    // alarmar con "no hiciste copia" — el export local es un extra, no la única red de seguridad.
+    else if (online && last == null) { txt = 'Tus datos se guardan en la nube. Podés exportar una copia extra'; cls = ''; ico = '☁️'; }
     else if (last == null) { txt = 'Todavía no hiciste ninguna copia de seguridad'; cls = 'is-urgent'; ico = '⚠️'; }
     else if (dias <= 0) { txt = 'Última copia de seguridad: hoy'; cls = 'is-ok'; ico = '✅'; }
     else if (dias === 1) { txt = 'Última copia de seguridad: ayer'; cls = ''; ico = '💾'; }
+    else if (online) { txt = 'Última copia extra: hace ' + dias + ' días (tus datos ya están en la nube)'; cls = ''; ico = '💾'; }
     else { txt = 'Última copia de seguridad: hace ' + dias + ' días'; cls = dias >= 3 ? 'is-urgent' : ''; ico = dias >= 3 ? '⚠️' : '💾'; }
     return el('a', { class: 'backup-bar ' + cls, href: '#/exportar' }, [
       el('span', { class: 'backup-bar-ico', text: ico }),

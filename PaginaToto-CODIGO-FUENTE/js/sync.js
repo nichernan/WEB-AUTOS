@@ -131,16 +131,21 @@
       if (ops.up[t].length) promises.push(sb.from(t).upsert(ops.up[t], { onConflict: key }));
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
-    if (!promises.length) { shadow = clone(state); return Promise.resolve(); }
+    if (!promises.length) { shadow = clone(state); return Promise.resolve(true); }
 
     return Promise.all(promises).then(function (results) {
       var bad = null;
       results.forEach(function (r) { if (r && r.error) bad = r.error; });
       if (bad) throw bad;
       shadow = clone(state);
+      return true;
     }).catch(function (e) {
       console.error('sync flush', e);
       App.ui && App.ui.toast('No se pudo guardar en la nube. Revisá internet.', 'error');
+      // reintenta solo en unos segundos (por si fue un corte momentáneo de internet)
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(function () { flush(store.getState()); }, 8000);
+      return false;
     });
   }
 
@@ -155,8 +160,8 @@
     pendingMigration = null;
     applyingRemote = true;
     try { store.hydrate(st); } finally { applyingRemote = false; }
-    return flush(store.getState()).then(function () {
-      App.ui && App.ui.toast('Datos subidos a la nube', 'success');
+    return flush(store.getState()).then(function (ok) {
+      if (ok) App.ui && App.ui.toast('Datos subidos a la nube', 'success');
     });
   }
   function skipMigration() { pendingMigration = null; }

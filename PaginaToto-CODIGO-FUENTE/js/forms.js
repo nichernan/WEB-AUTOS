@@ -169,8 +169,11 @@
       ]
     });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fMarca.value.trim() || !fModelo.value.trim()) { ui.toast('Marca y modelo son obligatorios', 'error'); return; }
+      submitted = true;
       var data = {
         marca: fMarca.value, modelo: fModelo.value, anio: fAnio.value, patente: fPatente.value,
         km: fKm.value, combustible: fComb.value, caja: fCaja.value, version: fVersion.value,
@@ -255,11 +258,14 @@
     });
     syncForma(); syncCotiz();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de compra', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) {
         ui.toast('Ingresá la cotización del dólar de la compra', 'error'); return;
       }
+      submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
         cotizacionUSD: fCotiz.value,
@@ -409,7 +415,9 @@
     });
     syncForma(); syncCotiz(); updatePreview();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de venta', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) { ui.toast('Ingresá la cotización del dólar de la venta', 'error'); return; }
       var tradeIn = null;
@@ -433,6 +441,7 @@
           notas: finNotas.value, cuotas: fc
         };
       }
+      submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value, cotizacionUSD: fCotiz.value,
         formaCobro: fForma.value, montoTransferencia: fTransf.value, montoEfectivo: fEfec.value,
@@ -485,8 +494,11 @@
     ];
     var m = ui.modal({ title: isEdit ? 'Editar reserva' : 'Reservar vehículo', body: body, footer: footer });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(sena.monto.value) <= 0) { ui.toast('Ingresá el monto de la seña', 'error'); return; }
+      submitted = true;
       store.setReservation(v.id, {
         fecha: fFecha.value, monto: sena.monto.value, moneda: sena.moneda.value, vence: fVence.value,
         cliente: { nombre: fClienteNom.value, telefono: fClienteTel.value },
@@ -525,8 +537,11 @@
       ]
     });
     syncCotiz();
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto del gasto', 'error'); return; }
+      submitted = true;
       var data = { monto: monto.monto.value, moneda: monto.moneda.value, fecha: fFecha.value, cotizacionUSD: fCotiz.value, observacion: fObs.value };
       if (expense) store.updateExpense(v.id, e.id, data);
       else store.addExpense(v.id, data);
@@ -592,9 +607,12 @@
     var m = ui.modal({ title: isEdit ? 'Editar gasto del negocio' : 'Nuevo gasto del negocio', body: body, footer: footer });
     sync();
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fConcepto.value.trim()) { ui.toast('Poné un concepto', 'error'); return; }
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto', 'error'); return; }
+      submitted = true;
       var data = {
         concepto: fConcepto.value, categoria: fCat.value, monto: monto.monto.value, moneda: monto.moneda.value,
         cotizacionUSD: fCotiz.value, frecuencia: fFrec.value, fecha: fFecha.value, hasta: fHasta.value, notas: fNotas.value
@@ -655,9 +673,12 @@
 
     var m = ui.modal({ title: isEdit ? 'Editar recordatorio' : 'Nuevo recordatorio', body: body, footer: footer });
 
+    var submitted = false;
     function submit() {
+      if (submitted) return;
       if (!fTitulo.value.trim()) { ui.toast('El título es obligatorio', 'error'); return; }
       if (!fFecha.value) { ui.toast('La fecha es obligatoria', 'error'); return; }
+      submitted = true;
       var data = { titulo: fTitulo.value, fecha: fFecha.value, hora: fHora.value, tipo: fTipo.value, nota: fNota.value, repeat: fRepeat.value };
       if (isEdit) { store.updateReminder(r.id, data); ui.toast('Recordatorio actualizado', 'success'); }
       else { store.addReminder(data); ui.toast('Recordatorio creado', 'success'); }

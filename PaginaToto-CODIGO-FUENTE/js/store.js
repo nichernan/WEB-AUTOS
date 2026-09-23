@@ -48,6 +48,13 @@
 
   function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+  // convierte a entero o null (nunca deja NaN guardado, p.ej. si alguien escribe letras en Año/Km)
+  function toIntOrNull(x) {
+    if (x === '' || x == null) return null;
+    var n = parseInt(x, 10);
+    return isNaN(n) ? null : n;
+  }
+
   /* --------------------------- Persistencia ------------------------------- */
   function load() {
     try {
@@ -181,6 +188,8 @@
   }
 
   function normalizeVehicle(v) {
+    v.anio = toIntOrNull(v.anio);
+    v.km = toIntOrNull(v.km);
     v.fotos = Array.isArray(v.fotos) ? v.fotos : [];
     v.expenses = Array.isArray(v.expenses) ? v.expenses : [];
     v.checklist = v.checklist || {};
@@ -234,9 +243,9 @@
       id: uid('v'),
       marca: (data.marca || '').trim(),
       modelo: (data.modelo || '').trim(),
-      anio: data.anio ? parseInt(data.anio, 10) : null,
+      anio: toIntOrNull(data.anio),
       patente: (data.patente || '').trim().toUpperCase(),
-      km: data.km != null && data.km !== '' ? parseInt(data.km, 10) : null,
+      km: toIntOrNull(data.km),
       combustible: data.combustible || '',
       caja: data.caja || '',
       version: (data.version || '').trim(),
@@ -431,9 +440,9 @@
         vehicleId: sale.tradeIn.vehicleId || null,
         marca: (sale.tradeIn.marca || '').trim(),
         modelo: (sale.tradeIn.modelo || '').trim(),
-        anio: sale.tradeIn.anio ? parseInt(sale.tradeIn.anio, 10) : null,
+        anio: toIntOrNull(sale.tradeIn.anio),
         patente: (sale.tradeIn.patente || '').trim().toUpperCase(),
-        km: sale.tradeIn.km ? parseInt(sale.tradeIn.km, 10) : null,
+        km: toIntOrNull(sale.tradeIn.km),
         valor: num(sale.tradeIn.valor),
         moneda: sale.tradeIn.moneda || 'ARS',
         observaciones: (sale.tradeIn.observaciones || '').trim(),

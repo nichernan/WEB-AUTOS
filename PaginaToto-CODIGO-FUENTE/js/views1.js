@@ -226,6 +226,11 @@
   function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
 
   /* --------------------------- FICHA DE VEHÍCULO ---------------------- */
+  // Recuerda la pestaña activa por vehículo entre renders (p.ej. cuando se
+  // registra un pago, o cuando otro usuario cambia algo en tiempo real): sin
+  // esto, cualquier actualización de datos mientras se mira una pestaña que
+  // no sea "Resumen" hacía volver la ficha a "Resumen" sin que el usuario lo pida.
+  var lastDetailTab = { id: null, tab: null };
   function vehicleDetail(root, id) {
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
@@ -304,9 +309,12 @@
       ['obs', 'Observaciones', function () { return tabObs(v); }],
       ['hist', 'Historial', function () { return tabHist(v); }]
     ];
-    var active = (location.hash.split('?')[1] || '').indexOf('tab=') === 0 ? location.hash.split('tab=')[1] : 'resumen';
+    var hashTab = (location.hash.split('?')[1] || '').indexOf('tab=') === 0 ? location.hash.split('tab=')[1] : null;
+    if (lastDetailTab.id !== id) lastDetailTab = { id: id, tab: hashTab || 'resumen' };
+    var active = lastDetailTab.tab;
     tabs.forEach(function (t) {
       var b = el('button', { class: 'tab' + (t[0] === active ? ' is-active' : ''), text: t[1], onclick: function () {
+        lastDetailTab = { id: id, tab: t[0] };
         ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
         b.classList.add('is-active');
         ui.clear(panel); ui.appendChildren(panel, t[2]());
@@ -625,15 +633,20 @@
 
   /* --------- Aviso de copia de seguridad (barra en Inicio) --------- */
   function backupBar() {
+    var online = !!(App.auth && App.auth.enabled);
     var last = store.getState().meta.lastBackupAt;
     var excelOn = false;
     try { excelOn = !!(App.excel && App.excel.status && App.excel.status().on); } catch (e) {}
     var dias = last ? Math.floor((Date.now() - last) / 86400000) : null;
     var txt, cls, ico;
     if (excelOn) { txt = 'Se está guardando solo en Excel'; cls = 'is-ok'; ico = '✅'; }
+    // en modo online los datos ya viven en la nube (Supabase): no hace falta
+    // alarmar con "no hiciste copia" — el export local es un extra, no la única red de seguridad.
+    else if (online && last == null) { txt = 'Tus datos se guardan en la nube. Podés exportar una copia extra'; cls = ''; ico = '☁️'; }
     else if (last == null) { txt = 'Todavía no hiciste ninguna copia de seguridad'; cls = 'is-urgent'; ico = '⚠️'; }
     else if (dias <= 0) { txt = 'Última copia de seguridad: hoy'; cls = 'is-ok'; ico = '✅'; }
     else if (dias === 1) { txt = 'Última copia de seguridad: ayer'; cls = ''; ico = '💾'; }
+    else if (online) { txt = 'Última copia extra: hace ' + dias + ' días (tus datos ya están en la nube)'; cls = ''; ico = '💾'; }
     else { txt = 'Última copia de seguridad: hace ' + dias + ' días'; cls = dias >= 3 ? 'is-urgent' : ''; ico = dias >= 3 ? '⚠️' : '💾'; }
     return el('a', { class: 'backup-bar ' + cls, href: '#/exportar' }, [
       el('span', { class: 'backup-bar-ico', text: ico }),
