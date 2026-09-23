@@ -1,0 +1,68 @@
+PASOS PARA ACTIVAR EL LOGIN MULTI-USUARIO
+========================================
+(una sola vez; después ya queda funcionando)
+
+
+PASO 1 — Base de datos
+----------------------
+1. Entrá a supabase.com -> tu proyecto "PaginaToto".
+2. Menú izquierdo: "SQL Editor" -> "New query".
+3. Abrí el archivo  1-base-de-datos.sql , copiá TODO y pegalo.
+4. Botón "Run" (abajo a la derecha). Tiene que decir "Success".
+
+
+PASO 2 — Función para administrar usuarios
+------------------------------------------
+Opción A (más fácil, desde la web):
+1. Menú izquierdo: "Edge Functions" -> "Deploy a new function" (o "Create function").
+2. Nombre EXACTO:  admin-users
+3. Borrá el código de ejemplo y pegá TODO el contenido de
+   funcion-admin-users/index.ts
+4. "Deploy".
+
+Opción B (si tenés la CLI de Supabase instalada):
+   supabase functions deploy admin-users --project-ref wprhqjmhsqwncbhouxvl
+
+(No hace falta configurar claves: Supabase le pasa solas la URL y la
+ SERVICE_ROLE_KEY a la función.)
+
+
+PASO 3 — Desactivar el registro libre
+-------------------------------------
+Para que NADIE pueda crearse una cuenta solo (solo el admin crea usuarios):
+1. Menú izquierdo: "Authentication" -> "Sign In / Providers" (o "Providers").
+2. En "Email": desactivá  "Allow new users to sign up".
+3. Guardá.
+
+
+PASO 4 — Crear el primer administrador (vos)
+-------------------------------------------
+1. Menú izquierdo: "Authentication" -> "Users" -> "Add user" -> "Create new user".
+2. Poné tu email y una contraseña (anotala). Marcá "Auto Confirm User".
+3. Ahora andá a "SQL Editor" -> "New query" y pegá esto,
+   CAMBIANDO el email por el tuyo:
+
+        update public.profiles
+        set role = 'admin', activo = true
+        where email = 'PONE-TU-EMAIL-ACA';
+
+4. "Run". Listo: ese usuario es el administrador.
+
+
+PASO 5 — Probar
+---------------
+La app YA quedó conectada a tu Supabase (la versión de la carpeta
+PaginaToto-WEB). No hay que tocar nada más en el código.
+
+1. Abrí PaginaToto-WEB/index.html (o publicala en Netlify, igual que antes)
+   y entrá con el email y la contraseña del administrador (PASO 4).
+2. Andá a  Ajustes -> Usuarios  y creá los usuarios de tu gente
+   (nombre, email, contraseña). Cada uno entra con lo suyo.
+3. Si ya tenías autos cargados en esa computadora, al entrar te va a
+   preguntar si querés subirlos a la nube. Deciles que sí (o que no, si
+   eran de prueba).
+
+Decime "listo el paso 5" y lo pruebo con vos: login, que se vea en tiempo
+real en dos computadoras, y que un usuario desactivado no pueda entrar.
+
+El link de Netlify de PaginaToto-WEB es el que usan todos.

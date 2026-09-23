@@ -1,0 +1,132 @@
+PaginaToto — Gestión de compraventa de autos
+============================================
+
+CÓMO ABRIRLA (en esta computadora)
+---------------------------------
+Hacé doble clic en:  PaginaToto.html
+
+Se abre en el navegador. No necesita internet, ni Python, ni servidor,
+ni instalar nada. Es UN SOLO ARCHIVO.
+
+Recomendado: abrir con Google Chrome o Microsoft Edge.
+(Si el doble clic abre otro programa: clic derecho → Abrir con → Chrome.)
+
+
+PUBLICARLA EN INTERNET (para pasarle el link a alguien)
+------------------------------------------------------
+Mirá el archivo:  PUBLICAR EN INTERNET.txt
+Ahí están los pasos (arrastrás la carpeta "PaginaToto-WEB" a Netlify y
+te queda un link para compartir). Cada persona que abre el link tiene
+su propia app con sus propios datos.
+
+
+DÓNDE SE GUARDAN LOS DATOS
+-------------------------
+Todo se guarda solo, dentro del navegador de esta computadora
+(no se sube nada a internet).
+
+IMPORTANTE:
+- Usá siempre el mismo navegador y el mismo archivo para no perder datos.
+- Si movés o renombrás PaginaToto.html, seguís viendo tus datos igual
+  mientras uses el mismo navegador.
+
+
+COPIAS DE SEGURIDAD (importante)
+-------------------------------
+Los datos viven en el navegador de esta computadora. Para no perderlos:
+
+1) En "Inicio" hay una barra que dice hace cuánto que no hacés copia
+   (se pone roja a los 3 días). Tocala y hacé la copia.
+2) Lo mejor: Ajustes -> "Guardar automáticamente en Excel" (Chrome/Edge).
+3) La app también guarda sola una copia interna por día (últimas 5).
+   Si borrás algo sin querer: Ajustes -> "Restaurar una copia anterior".
+4) "Borrar todo" pide escribir la palabra BORRAR y descarga una copia
+   antes de borrar.
+
+
+NUEVO EN ESTA VERSIÓN
+---------------------
+- Se sacó la carga de fotos (ponía un ícono de auto). Así no se llena
+  el almacenamiento del navegador.
+- Reserva / seña: al reservar un auto se anota cuánto de seña, quién,
+  y hasta cuándo. Avisa cuando se acerca el vencimiento.
+- "Gastos del negocio" (menú nuevo): alquiler, sueldos, seguros…
+  Ahora el "Resultado del negocio" descuenta esos gastos.
+- Venta financiada / con prenda: se cargan las cuotas que TE van a pagar.
+- Comisiones: si alguien te acercó la compra o la venta, se anota y
+  se descuenta de la ganancia de ese auto.
+- "Cuotas y cobros" (menú nuevo): todo lo que tenés que pagar y lo que
+  te tienen que pagar, con fechas y botones "Pagué" / "Me pagaron".
+  Los vencimientos aparecen solos en Alertas y en el calendario.
+- Recordatorios que se repiten: marcar "esta semana la hice" ya no
+  completa toda la serie.
+- Avisos del navegador (Ajustes) + un aviso al abrir la app si tenés
+  algo vencido o para hoy.
+
+
+GUARDAR TODO EN UN EXCEL
+-----------------------
+En la sección "Exportar":
+
+- "Descargar Excel": genera un archivo Excel con TODO tu negocio
+  (autos, compras, ventas, gastos, cuotas, recordatorios, historial de
+  movimientos y resúmenes). Cada tema en su propia hoja, con colores,
+  encabezados en negrita y todo separado por columnas.
+
+- GUARDADO AUTOMÁTICO (Chrome o Edge en computadora):
+  Ajustes → "Guardar automáticamente en Excel" → "Elegir archivo Excel".
+  Elegís el archivo UNA vez y, a partir de ahí, cada cosa que hagas en la
+  app queda escrita sola en ese Excel. Si más adelante pasa algo con la
+  app, tenés todo en el Excel.
+  Nota: al cerrar y volver a abrir la app, Chrome pide permiso de nuevo
+  para escribir el archivo — hay un botón "Reconectar" en Ajustes.
+
+- "Exportar copia (JSON)": es la copia para RESTAURAR. El Excel es para
+  leer/consultar; el JSON es el que se vuelve a cargar en la app si
+  cambiás de computadora.
+
+
+DATOS DE EJEMPLO
+----------------
+La primera vez aparecen 3 autos y 4 recordatorios de ejemplo.
+Se borran desde:  Ajustes → Reiniciar todos los datos.
+
+
+NOVEDADES DE ESTA VERSIÓN
+-------------------------
+- Se quitó la sección "Gráficos".
+- Se quitó la sección "Compras y ventas": todo eso se ve desde
+  "Historial" (con los filtros Compras / Ventas). Cada movimiento
+  se puede tocar para ir a la ficha del auto.
+- "Estadísticas" ahora está integrada dentro de "Resúmenes"
+  (mismos datos, con los filtros de período arriba).
+- En "Inicio", arriba a la derecha, hay un botón "🔔 Alertas" con
+  el número de alertas pendientes; lleva directo a esa sección.
+- Revisada la vista en celular para que sea fácil y cómoda:
+    * Barra de navegación abajo con accesos directos:
+      Inicio · Finanzas · Historial · Alertas · Menú
+      (Alertas muestra el número de pendientes).
+    * "Menú" abre el resto de las secciones.
+    * Encabezado más limpio (nombre + botón "＋").
+    * Tarjetas de resumen en 2 columnas, lista de autos prolija.
+    * Botones, campos y casillas más grandes para el dedo; los
+      campos no hacen zoom al tocarlos.
+  En la compu se ve igual que siempre (menú lateral, sin barra abajo).
+- "Alertas" rediseñada + calendario con recordatorios:
+    * Botón "＋ Nuevo recordatorio" (título y fecha obligatorios;
+      hora, tipo, nota y repetición opcionales).
+    * Calendario mensual: los días con recordatorios se marcan con un punto;
+      al tocar un día se ven sus recordatorios.
+    * Los recordatorios aparecen en Alertas ordenados por urgencia
+      (Vencidos → Hoy → Próximos) y se pueden marcar como completados.
+    * Todo se guarda junto con el resto de los datos y entra en el
+      respaldo JSON de "Exportar".
+- "Exportar" ahora genera un Excel colorido con todo (ver arriba) y,
+  opcionalmente, lo mantiene actualizado solo.
+
+
+LA CARPETA "PaginaToto-CODIGO-FUENTE"
+------------------------------------
+NO hace falta para usar la app. Es solo el código separado en archivos,
+por si más adelante hay que hacer cambios. Para usar la app, siempre
+abrí  PaginaToto.html.

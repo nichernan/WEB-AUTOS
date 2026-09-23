@@ -1,0 +1,83 @@
+CÓMO PUBLICAR PaginaToto EN INTERNET (gratis, 5 minutos)
+=======================================================
+
+Lo que vas a subir es la carpeta:   PaginaToto-WEB
+(adentro tiene: index.html, manifest.webmanifest, icon.svg)
+
+Te queda un link tipo   https://elnombrequeelijas.netlify.app
+Ese link se lo pasás a tu amigo y listo.
+
+
+─────────────────────────────────────────────
+OPCIÓN RECOMENDADA: NETLIFY  (ya lo usás para la Parrilla)
+─────────────────────────────────────────────
+
+1) Entrá a:   https://app.netlify.com/drop
+   (si te pide, iniciá sesión con tu cuenta de Netlify)
+
+2) Con el mouse, ARRASTRÁ la carpeta "PaginaToto-WEB" entera
+   y soltala en el recuadro grande de esa página.
+
+3) Espera unos segundos. Te muestra un link tipo
+   https://superlative-tarsier-123abc.netlify.app  ->  ya funciona.
+
+4) (Opcional) Ponele un nombre lindo:
+   - "Site configuration"  ->  "Change site name"
+   - Escribí algo corto, por ejemplo:  paginatoto-<nombre-del-negocio>
+   - Queda:  https://paginatoto-<nombre>.netlify.app
+
+5) Pasale ESE link a tu amigo. Que lo abra en el celular o la compu.
+   En el celular puede hacer "Agregar a pantalla de inicio" y le queda
+   como una app con ícono.
+
+
+PARA ACTUALIZAR LA APP MÁS ADELANTE
+----------------------------------
+Si se cambia algo del programa, entrás a tu sitio en Netlify, vas a
+"Deploys" y arrastrás de nuevo la carpeta "PaginaToto-WEB".
+Se actualiza para todos y NADIE pierde sus datos.
+
+
+─────────────────────────────────────────────
+OPCIÓN AÚN MÁS SIMPLE (si no querés cuenta): tiiny.host
+─────────────────────────────────────────────
+1) Entrá a  https://tiiny.host
+2) Arrastrá la carpeta "PaginaToto-WEB" (o comprimila en .zip y subí el zip).
+3) Elegí un nombre y te da el link.
+(Gratis alcanza para esto. Netlify es un poco más completo.)
+
+
+═════════════════════════════════════════════
+IMPORTANTE — CÓMO FUNCIONAN LOS DATOS (leé esto y contale a tu amigo)
+═════════════════════════════════════════════
+
+• Cada persona que abre el link tiene SU PROPIA app y SUS PROPIOS datos.
+  Vos y tu amigo NO comparten información. Él arranca de cero con su negocio.
+
+• Los datos de cada uno se guardan en el navegador de SU dispositivo
+  (no hay un servidor con la información; no se sube nada a internet).
+
+• Por eso tu amigo tiene que tener en cuenta:
+  - Si usa el celular y la computadora, son datos SEPARADOS
+    (no se sincronizan solos).
+  - Si borra los datos de navegación / usa modo incógnito / cambia de
+    navegador -> pierde lo cargado.
+
+• BACKUP (que tu amigo lo haga sí o sí):
+  - En computadora con Chrome o Edge:
+    Ajustes -> "Guardar automáticamente en Excel" -> elegir un archivo.
+    A partir de ahí el Excel se actualiza solo con cada cambio.
+  - O cada tanto:  Exportar -> "Exportar copia (JSON)"  y guardar ese
+    archivo. Ese JSON es el que se vuelve a cargar si cambia de equipo.
+
+• Pasar los datos de un dispositivo a otro:
+  Exportar copia (JSON) en uno  ->  Importar copia (JSON) en el otro.
+
+• El link es "privado por lo bajo": solo lo tiene quien vos se lo pases.
+  No aparece en Google. Igual, cualquiera con el link puede abrir la app
+  (pero vería su propia versión vacía, no los datos de nadie).
+
+• ¿Querés que varias personas compartan los MISMOS datos en tiempo real,
+  o entrar con usuario y contraseña? Eso ya necesita una base de datos
+  online (como la Parrilla con Supabase). Se puede hacer más adelante,
+  es otro trabajo aparte.
