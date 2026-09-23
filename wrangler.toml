@@ -1,5 +1,8 @@
-# Configuración de despliegue de Cloudflare Pages.
-# Fija la carpeta que se publica: la app WEB completa (login + Supabase)
-# vive en PaginaToto-WEB/index.html.
+# Configuración de despliegue de Cloudflare Workers (Static Assets).
+# El proyecto "web-autos" es un Worker (no Pages): sirve los archivos
+# estáticos de PaginaToto-WEB/ (la app completa con login + Supabase).
 name = "web-autos"
-pages_build_output_dir = "PaginaToto-WEB"
+compatibility_date = "2024-09-23"
+
+[assets]
+directory = "PaginaToto-WEB"
