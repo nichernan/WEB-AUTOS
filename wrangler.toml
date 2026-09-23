@@ -1,0 +1,5 @@
+# Configuración de despliegue de Cloudflare Pages.
+# Fija la carpeta que se publica: la app WEB completa (login + Supabase)
+# vive en PaginaToto-WEB/index.html.
+name = "web-autos"
+pages_build_output_dir = "PaginaToto-WEB"
