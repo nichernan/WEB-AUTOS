@@ -332,9 +332,11 @@
     var v = getVehicle(id);
     if (!v) return;
     state.vehicles = state.vehicles.filter(function (x) { return x.id !== id; });
-    // limpiar referencias de parte de pago
+    // limpiar referencias de parte de pago (en ambos sentidos, para que ninguna
+    // relación quede apuntando a un vehículo que ya no existe)
     state.vehicles.forEach(function (x) {
       if (x.sale && x.sale.tradeIn && x.sale.tradeIn.vehicleId === id) x.sale.tradeIn.vehicleId = null;
+      if (x.origin && x.origin.type === 'parte-de-pago' && x.origin.saleVehicleId === id) x.origin.saleVehicleId = null;
     });
     state.history = state.history.filter(function (h) { return h.vehicleId !== id; });
     emit();

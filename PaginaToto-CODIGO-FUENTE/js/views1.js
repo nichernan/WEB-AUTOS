@@ -343,6 +343,33 @@
     }));
   }
 
+  // Tarjeta "Origen: parte de pago" — de dónde vino este vehículo, cuánto costó
+  // tomarlo, y el margen potencial (en stock) o la ganancia realizada (vendido).
+  // Reutiliza los mismos números que ya calcula vehicleMetrics para cualquier
+  // vehículo — no inventa una fórmula nueva.
+  function origenCard(v, m) {
+    var orig = v.origin.saleVehicleId ? store.getVehicle(v.origin.saleVehicleId) : null;
+    var rows = [
+      ['Recibido en la venta de', orig ? store.vehicleName(orig) : 'una operación que ya no existe'],
+      ['Costo de toma', fmt.money(m.compraARS)]
+    ];
+    if (!m.vendido) {
+      rows.push(['Valor estimado de venta', v.precioPretendido ? fmt.money(v.precioPretendido, v.precioPretendidoMoneda) : '— (no cargado)']);
+      if (v.precioPretendido) {
+        var margen = m.estimadoARS - m.costoTotalARS;
+        rows.push(['Margen potencial', (margen >= 0 ? '+' : '') + fmt.money(margen), margen >= 0 ? 'pos strong' : 'neg strong']);
+      }
+    } else {
+      rows.push(['Vendido en', fmt.money(m.ventaARS)]);
+      rows.push(['Ganancia realizada', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong']);
+    }
+    return el('div', { class: 'card info-card' }, [
+      el('h4', { text: '🔁 Origen: parte de pago' }),
+      dl(rows),
+      orig ? el('a', { class: 'btn btn-sm btn-primary', href: '#/vehiculo/' + orig.id + '?tab=venta', text: 'Ver operación' }) : null
+    ]);
+  }
+
   function tabResumen(v, m) {
     var out = [];
     out.push(el('div', { class: 'grid-2' }, [
@@ -367,11 +394,8 @@
         m.financPorCobrarARS ? ['Falta que te paguen', fmt.money(m.financPorCobrarARS), m.financVencidasARS ? 'neg' : ''] : null
       ])])
     ]));
-    if (v.origin && v.origin.type === 'parte-de-pago' && v.origin.saleVehicleId) {
-      var orig = store.getVehicle(v.origin.saleVehicleId);
-      out.push(el('div', { class: 'card info-card' }, [
-        el('p', { html: 'Este vehículo ingresó como <strong>parte de pago</strong> en la venta de ' + (orig ? '<a href="#/vehiculo/' + orig.id + '">' + store.vehicleName(orig) + '</a>' : 'otra operación') + '.' })
-      ]));
+    if (v.origin && v.origin.type === 'parte-de-pago') {
+      out.push(origenCard(v, m));
     }
     if (v.observaciones) out.push(el('div', { class: 'card' }, [el('h4', { text: 'Observaciones' }), el('p', { class: 'obs-text', text: v.observaciones })]));
     return out;
