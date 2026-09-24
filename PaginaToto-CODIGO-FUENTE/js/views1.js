@@ -60,15 +60,18 @@
   }
 
   /* ------------------------------ DASHBOARD --------------------------- */
+  // Reutiliza exactamente fin.globalMetrics() y fin.monthlySeries() — los
+  // mismos datos y fórmulas que ya usan Economía y Resúmenes. Acá solo se
+  // reorganiza la presentación (jerarquía visual), no se calcula nada nuevo.
   function dashboard(root) {
     var g = fin.globalMetrics();
-    var wrap = el('div', { class: 'page' });
+    var wrap = el('div', { class: 'page home-dashboard' });
 
     var alertN = App.alerts ? App.alerts.count() : 0;
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
         el('h1', { text: 'Inicio' }),
-        el('p', { class: 'page-sub', text: 'Resumen general del negocio' })
+        el('p', { class: 'page-sub', text: 'Resumen de tu negocio' })
       ]),
       el('div', { class: 'page-head-actions' }, [
         el('a', { class: 'btn btn-ghost btn-alertas' + (alertN ? ' has-alerts' : ''), href: '#/alertas', 'aria-label': 'Ir a Alertas' + (alertN ? ' (' + alertN + ' pendientes)' : '') }, [
@@ -80,17 +83,8 @@
       ])
     ]));
 
-    // aviso de copia de seguridad
+    // aviso de copia de seguridad + cuotas vencidas (mismos avisos de siempre)
     wrap.appendChild(App.views._backupBar());
-
-    // stat cards
-    wrap.appendChild(el('div', { class: 'stat-grid' }, [
-      statCard('Autos en stock', fmt.num(g.autosEnStock), 'En stock + reservados', 'car'),
-      statCard('Capital invertido', fmt.money(g.capitalInvertido), 'Compra + gastos + comisiones', 'cash'),
-      statCard('Autos vendidos', fmt.num(g.autosVendidos), 'Operaciones cerradas', 'check'),
-      statCard('Resultado del mes', fmt.money(g.resultadoNetoDelMes), 'Ganancias − gastos fijos', 'trend', g.resultadoNetoDelMes >= 0 ? 'pos' : 'neg')
-    ]));
-
     if (g.porCobrarVencido > 0 || g.porPagarVencido > 0) {
       wrap.appendChild(el('a', { class: 'card dash-cuotas-alert', href: '#/cuotas' }, [
         el('span', { text: '💸' }),
@@ -101,7 +95,47 @@
       ]));
     }
 
-    // toolbar
+    // --- Métricas: jerarquía en vez de 4 cuadrados iguales ---
+    // Resultado del mes: el dato protagonista (misma fórmula de siempre).
+    wrap.appendChild(el('div', { class: 'econ-hero' }, [
+      el('span', { class: 'econ-hero-label', text: 'Resultado del mes' }),
+      el('span', { class: 'econ-hero-value ' + (g.resultadoNetoDelMes >= 0 ? 'pos' : 'neg'), text: (g.resultadoNetoDelMes >= 0 ? '+' : '') + fmt.money(g.resultadoNetoDelMes) }),
+      el('span', { class: 'econ-hero-sub', text: 'Ganancias − gastos fijos' })
+    ]));
+    // Capital invertido: segundo en importancia (misma tarjeta de siempre, sola,
+    // a todo el ancho para que se destaque sin competir con un grid de 4).
+    wrap.appendChild(statCard('Capital invertido', fmt.money(g.capitalInvertido), 'Compra + gastos + comisiones', 'cash'));
+    // Autos en stock / vendidos: más discretas.
+    wrap.appendChild(el('div', { class: 'grid-2' }, [
+      miniStatHome('Autos en stock', fmt.num(g.autosEnStock), 'En stock + reservados'),
+      miniStatHome('Autos vendidos', fmt.num(g.autosVendidos), 'Operaciones cerradas')
+    ]));
+
+    // --- Rendimiento del negocio: evolución real de los últimos meses ---
+    wrap.appendChild(rendimientoCard());
+
+    // --- Vehículos en stock: vista curada, protagonista ---
+    var stock = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
+      .sort(function (a, b) { return b.createdAt - a.createdAt; });
+    var stockCard = el('div', { class: 'card' }, [
+      el('div', { class: 'card-head' }, [
+        el('h3', { text: 'Vehículos en stock' }),
+        el('button', { class: 'btn btn-sm btn-ghost', text: 'Ver todos →', onclick: function () {
+          var target = document.getElementById('vehiculos-todos');
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } })
+      ])
+    ]);
+    if (!stock.length) {
+      stockCard.appendChild(ui.emptyState('No hay vehículos en stock todavía.', '🚗'));
+    } else {
+      var stockList = el('div', { class: 'vehicle-list' });
+      stock.slice(0, 5).forEach(function (v) { stockList.appendChild(stockRow(v)); });
+      stockCard.appendChild(stockList);
+    }
+    wrap.appendChild(stockCard);
+
+    // --- Todos los vehículos: la lista completa con búsqueda/filtros de siempre ---
     var searchInput = ui.input({ value: filters.q, placeholder: 'Buscar por marca, modelo, año, patente, nombre...', class: 'input search-input' });
     searchInput.addEventListener('input', function () { filters.q = searchInput.value; renderList(); });
     var sortSel = ui.select([
@@ -122,9 +156,9 @@
     wrap.appendChild(filtersPanel);
 
     var listWrap = el('div', { class: 'vehicle-list' });
-    wrap.appendChild(el('div', { class: 'card' }, [
+    wrap.appendChild(el('div', { class: 'card', id: 'vehiculos-todos' }, [
       el('div', { class: 'card-head' }, [
-        el('h3', { text: 'Vehículos' }),
+        el('h3', { text: 'Todos los vehículos' }),
         el('span', { class: 'count-tag', id: 'veh-count' })
       ]),
       listWrap
@@ -151,6 +185,88 @@
         el('span', { class: 'stat-label', text: label }),
         el('span', { class: 'stat-value ' + (tone || ''), text: value }),
         el('span', { class: 'stat-sub', text: sub })
+      ])
+    ]);
+  }
+
+  // Mismo componente visual "mini-stat" que ya usa Economía — se reutiliza acá.
+  function miniStatHome(label, value, sub) {
+    return el('div', { class: 'mini-stat' }, [
+      el('span', { class: 'mini-stat-label', text: label }),
+      el('span', { class: 'mini-stat-value', text: value }),
+      sub ? el('span', { class: 'mini-stat-sub', text: sub }) : null
+    ]);
+  }
+
+  /* ------------------- Rendimiento del negocio (gráfico) --------------- */
+  // Reutiliza fin.monthlySeries(), la misma serie mensual que ya usan
+  // Resúmenes y la exportación a Excel — datos reales (compras, gastos y
+  // ventas ya registrados), sin ningún valor inventado.
+  function rendimientoCard() {
+    var meses = fin.monthlySeries(6);
+    var card = el('div', { class: 'card' }, [el('h3', { text: 'Rendimiento del negocio' })]);
+    var sinDatos = meses.every(function (m) { return !m.ganancias && !m.gastos && !m.gastosFijos; });
+    if (sinDatos) {
+      card.appendChild(ui.emptyState('Todavía no hay compras, gastos o ventas registrados para graficar.', '📈'));
+      return card;
+    }
+    card.appendChild(homeChart(meses));
+    card.appendChild(el('div', { class: 'chart-legend' }, [
+      el('span', { class: 'chart-legend-item' }, [el('span', { class: 'chart-dot chart-dot-ganancia' }), el('span', { text: 'Ganancias' })]),
+      el('span', { class: 'chart-legend-item' }, [el('span', { class: 'chart-dot chart-dot-gasto' }), el('span', { text: 'Gastos' })])
+    ]));
+    return card;
+  }
+
+  function homeChart(meses) {
+    var W = 640, H = 190, padSide = 8, padBottom = 24, padTop = 8;
+    var chartH = H - padTop - padBottom;
+    var zeroY = padTop + chartH / 2;
+    var maxVal = 1;
+    meses.forEach(function (m) { maxVal = Math.max(maxVal, m.ganancias, m.gastos + m.gastosFijos); });
+    var scale = (chartH / 2 - 4) / maxVal;
+    var slotW = (W - padSide * 2) / meses.length;
+    var barW = Math.max(10, Math.min(28, slotW * 0.3));
+
+    var parts = [];
+    parts.push('<line x1="' + padSide + '" y1="' + zeroY + '" x2="' + (W - padSide) + '" y2="' + zeroY + '" class="chart-axis" />');
+    meses.forEach(function (m, i) {
+      var cx = padSide + slotW * i + slotW / 2;
+      var gH = m.ganancias * scale;
+      var gastosTotal = m.gastos + m.gastosFijos;
+      var eH = gastosTotal * scale;
+      if (gH > 0.5) parts.push('<rect x="' + (cx - barW - 2).toFixed(1) + '" y="' + (zeroY - gH).toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + gH.toFixed(1) + '" rx="3" class="chart-bar-ganancia" />');
+      if (eH > 0.5) parts.push('<rect x="' + (cx + 2).toFixed(1) + '" y="' + zeroY.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + eH.toFixed(1) + '" rx="3" class="chart-bar-gasto" />');
+      parts.push('<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="chart-month-label">' + escXml(m.label) + '</text>');
+    });
+
+    var svgWrap = el('div', { class: 'home-chart' });
+    svgWrap.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ganancias y gastos de los últimos meses">' + parts.join('') + '</svg>';
+    return svgWrap;
+  }
+  function escXml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  // Fila "protagonista" para el stock destacado de Inicio (más espaciosa que
+  // vehicleRow, mismos datos: store.vehicleName, fin.vehicleMetrics, badges
+  // y navegación existentes — nada nuevo).
+  function stockRow(v) {
+    var m = fin.vehicleMetrics(v);
+    return el('a', { class: 'home-stock-row', href: '#/vehiculo/' + v.id }, [
+      el('div', { class: 'row-thumb' }, ui.carIcon()),
+      el('div', { class: 'home-stock-main' }, [
+        el('div', { class: 'home-stock-top' }, [
+          el('span', { class: 'row-name', text: store.vehicleName(v) }),
+          el('span', { class: 'home-stock-value', text: fmt.money(m.costoTotalARS) })
+        ]),
+        el('div', { class: 'home-stock-badges' }, [
+          ui.estadoBadge(v.estado),
+          v.documentacion && v.documentacion !== 'completa' ? ui.docBadge(v.documentacion) : null,
+          v.patente ? el('span', { class: 'row-patente', text: v.patente }) : null
+        ]),
+        el('div', { class: 'home-stock-meta' }, [
+          v.purchase ? el('span', { text: 'Compra: ' + fmt.money(v.purchase.precio, v.purchase.moneda) }) : null,
+          m.diasEnStock != null ? el('span', { text: fmt.days(m.diasEnStock) + ' en stock' }) : null
+        ])
       ])
     ]);
   }

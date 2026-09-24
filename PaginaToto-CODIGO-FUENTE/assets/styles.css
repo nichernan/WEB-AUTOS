@@ -228,6 +228,7 @@ img { max-width: 100%; display: block; }
 }
 .mini-stat-label { font-size: .76rem; color: var(--c-text-mute); }
 .mini-stat-value { font-size: 1.12rem; font-weight: 700; }
+.mini-stat-sub { font-size: .72rem; color: var(--c-text-mute); }
 
 .pos { color: var(--c-success); }
 .neg { color: var(--c-danger); }
@@ -292,6 +293,32 @@ img { max-width: 100%; display: block; }
 }
 .row-ganancia { font-weight: 700; font-size: .92rem; }
 .row-inversion { font-weight: 600; font-size: .88rem; color: var(--c-text-soft); }
+
+/* --------- Inicio: fila destacada de "Vehículos en stock" ------------ */
+.home-stock-row {
+  display: flex; align-items: flex-start; gap: 13px; padding: 13px 6px;
+  border-bottom: 1px solid var(--c-border); transition: background .1s;
+}
+.home-stock-row:last-child { border-bottom: none; }
+.home-stock-row:hover { background: var(--c-surface-2); }
+.home-stock-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.home-stock-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.home-stock-value { font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+.home-stock-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.home-stock-meta { display: flex; gap: 10px; font-size: .78rem; color: var(--c-text-mute); flex-wrap: wrap; }
+
+/* --------- Inicio: gráfico "Rendimiento del negocio" ------------------ */
+.home-chart { width: 100%; }
+.home-chart svg { display: block; width: 100%; height: auto; }
+.chart-axis { stroke: var(--c-border-strong); stroke-width: 1; }
+.chart-bar-ganancia { fill: var(--c-success); }
+.chart-bar-gasto { fill: var(--c-danger); opacity: .78; }
+.chart-month-label { fill: var(--c-text-mute); font-size: 9px; font-family: var(--font); }
+.chart-legend { display: flex; gap: 18px; justify-content: center; margin-top: 2px; }
+.chart-legend-item { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--c-text-soft); }
+.chart-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.chart-dot-ganancia { background: var(--c-success); }
+.chart-dot-gasto { background: var(--c-danger); opacity: .78; }
 
 /* ============================== Badges ========================== */
 .badge {
@@ -649,6 +676,13 @@ details.card[open] > summary { margin-bottom: 10px; }
   .stat-sub { font-size: .7rem; }
   .mini-stat { padding: 11px 12px; }
   .mini-stat-value { font-size: 1.02rem; }
+
+  /* Inicio: fila de stock y gráfico más cómodos en celular */
+  .home-stock-row { padding: 12px 4px; gap: 10px; }
+  .home-stock-top { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .home-stock-value { font-size: 1.05rem; }
+  .row-thumb { width: 46px; height: 40px; }
+  .chart-month-label { font-size: 8px; }
 
   /* Filas de vehículo: nombre completo + precio/patente en su propia línea */
   .vehicle-row { gap: 10px; padding: 11px 4px; flex-wrap: wrap; align-items: flex-start; }
