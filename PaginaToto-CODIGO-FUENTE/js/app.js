@@ -11,7 +11,7 @@
   // de "Ajustes". Las rutas siguen existiendo igual, solo dejaron de
   // aparecer como ítems propios del menú.
   var NAV = [
-    { path: '', icon: '🏠', label: 'Inicio' },
+    { path: '', icon: '🏠', label: 'Vehículos' },
     { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
@@ -21,7 +21,7 @@
 
   // Barra inferior para celular (accesos directos más usados)
   var BOTTOM_NAV = [
-    { path: '', icon: '🏠', label: 'Inicio' },
+    { path: '', icon: '🏠', label: 'Vehículos' },
     { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'cuotas', icon: '💳', label: 'Cuotas' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
@@ -33,7 +33,8 @@
   var SUBROUTE_OF = {
     finanzas: 'economia', 'gastos-negocio': 'economia', cuotas: 'economia',
     resumenes: 'economia', comparacion: 'economia',
-    papelera: 'ajustes', exportar: 'ajustes'
+    papelera: 'ajustes', exportar: 'ajustes',
+    vehiculos: ''
   };
 
   var appRoot, mainEl, sidebarEl, searchEl;
@@ -126,6 +127,7 @@
     try {
       switch (p.name) {
         case '': App.views.dashboard(mainEl); break;
+        case 'vehiculos': App.views.vehicleList(mainEl); break;
         case 'vehiculo': App.views.vehicleDetail(mainEl, p.param); break;
         case 'vehiculo-nuevo': App.forms.vehicleFormView(mainEl); break;
         case 'vehiculo-editar': App.forms.vehicleFormView(mainEl, p.param); break;
@@ -155,7 +157,7 @@
 
     // sync nav active (lateral + barra inferior)
     var activePath = (p.name === 'vehiculo') ? '' : p.name;
-    if (SUBROUTE_OF[activePath]) activePath = SUBROUTE_OF[activePath];
+    if (SUBROUTE_OF.hasOwnProperty(activePath)) activePath = SUBROUTE_OF[activePath];
     ui.qsa('.nav-item', sidebarEl).forEach(function (a) {
       a.classList.toggle('is-active', a.dataset.path === activePath);
     });

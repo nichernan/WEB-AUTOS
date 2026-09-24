@@ -60,9 +60,11 @@
   }
 
   /* ------------------------------ DASHBOARD --------------------------- */
-  // Reutiliza exactamente fin.globalMetrics() y fin.monthlySeries() — los
-  // mismos datos y fórmulas que ya usan Economía y Resúmenes. Acá solo se
-  // reorganiza la presentación (jerarquía visual), no se calcula nada nuevo.
+  // "Vehículos" (antes "Inicio"). Reutiliza exactamente fin.globalMetrics()
+  // — los mismos datos y fórmulas que ya usan Economía y Resúmenes. Acá solo
+  // se reorganiza la presentación: el stock y las ventas pasan a ser lo
+  // protagonista, y el listado completo (buscador/filtros/orden, sin cambios)
+  // se movió a vehicleListView(), accesible desde acá sin duplicarlo.
   function dashboard(root) {
     var g = fin.globalMetrics();
     var wrap = el('div', { class: 'page home-dashboard' });
@@ -70,8 +72,8 @@
     var alertN = App.alerts ? App.alerts.count() : 0;
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
-        el('h1', { text: 'Inicio' }),
-        el('p', { class: 'page-sub', text: 'Resumen de tu negocio' })
+        el('h1', { text: 'Vehículos' }),
+        el('p', { class: 'page-sub', text: 'Tu stock, tus ventas y el estado del negocio' })
       ]),
       el('div', { class: 'page-head-actions' }, [
         el('a', { class: 'btn btn-ghost btn-alertas' + (alertN ? ' has-alerts' : ''), href: '#/alertas', 'aria-label': 'Ir a Alertas' + (alertN ? ' (' + alertN + ' pendientes)' : '') }, [
@@ -95,47 +97,68 @@
       ]));
     }
 
-    // --- Métricas: jerarquía en vez de 4 cuadrados iguales ---
-    // Resultado del mes: el dato protagonista (misma fórmula de siempre).
-    wrap.appendChild(el('div', { class: 'econ-hero' }, [
-      el('span', { class: 'econ-hero-label', text: 'Resultado del mes' }),
-      el('span', { class: 'econ-hero-value ' + (g.resultadoNetoDelMes >= 0 ? 'pos' : 'neg'), text: (g.resultadoNetoDelMes >= 0 ? '+' : '') + fmt.money(g.resultadoNetoDelMes) }),
-      el('span', { class: 'econ-hero-sub', text: 'Ganancias − gastos fijos' })
-    ]));
-    // Capital invertido: segundo en importancia (misma tarjeta de siempre, sola,
-    // a todo el ancho para que se destaque sin competir con un grid de 4).
-    wrap.appendChild(statCard('Capital invertido', fmt.money(g.capitalInvertido), 'Compra + gastos + comisiones', 'cash'));
-    // Autos en stock / vendidos: más discretas.
+    // --- Lo primero: cuántos autos tengo y cuántos vendí (protagonistas,
+    // clickeables — llevan al listado completo ya filtrado). ---
     wrap.appendChild(el('div', { class: 'grid-2' }, [
-      miniStatHome('Autos en stock', fmt.num(g.autosEnStock), 'En stock + reservados'),
-      miniStatHome('Autos vendidos', fmt.num(g.autosVendidos), 'Operaciones cerradas')
+      heroLink('Autos en stock', fmt.num(g.autosEnStock), 'Ver vehículos →', function () { goVehiculos('no'); }),
+      heroLink('Autos vendidos', fmt.num(g.autosVendidos), 'Ver vendidos →', function () { goVehiculos('si'); })
     ]));
 
-    // --- Rendimiento del negocio: evolución real de los últimos meses ---
-    wrap.appendChild(rendimientoCard());
+    // --- Después: cómo está el resultado y el capital (informativo, más discreto) ---
+    wrap.appendChild(el('div', { class: 'grid-2' }, [
+      miniStatHome('Resultado del mes', (g.resultadoNetoDelMes >= 0 ? '+' : '') + fmt.money(g.resultadoNetoDelMes), 'Ganancias − gastos fijos', g.resultadoNetoDelMes >= 0 ? 'pos' : 'neg'),
+      miniStatHome('Capital invertido', fmt.money(g.capitalInvertido), 'Compra + gastos + comisiones')
+    ]));
 
-    // --- Vehículos en stock: vista curada, protagonista ---
-    var stock = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
-      .sort(function (a, b) { return b.createdAt - a.createdAt; });
-    var stockCard = el('div', { class: 'card' }, [
-      el('div', { class: 'card-head' }, [
-        el('h3', { text: 'Vehículos en stock' }),
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Ver todos →', onclick: function () {
-          var target = document.getElementById('vehiculos-todos');
-          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } })
-      ])
+    // --- Acceso al listado completo (buscador, filtros, orden — sin duplicarlo) ---
+    wrap.appendChild(el('div', { class: 'center' }, [
+      el('a', { class: 'btn btn-ghost', href: '#/vehiculos', text: 'Ver todos los vehículos →' })
+    ]));
+
+    root.appendChild(wrap);
+  }
+
+  // Reutiliza el mismo objeto App.filters que ya usa el buscador/filtros del
+  // listado completo — solo se resetean y se deja cargado "vendido" antes de
+  // navegar, sin crear ningún mecanismo de filtrado nuevo.
+  function goVehiculos(vendidoValue) {
+    Object.keys(filters).forEach(function (k) { if (k !== 'sort') filters[k] = ''; });
+    filters.vendido = vendidoValue;
+    App.router.go('vehiculos');
+  }
+
+  // Bloque grande y clickeable (mismo estilo "hero" que ya usa Economía para
+  // el Resultado del negocio), con una acción por debajo tipo link.
+  function heroLink(label, value, actionText, onclick) {
+    return el('div', { class: 'econ-hero econ-hero-link', onclick: onclick, role: 'button', tabindex: '0' }, [
+      el('span', { class: 'econ-hero-label', text: label }),
+      el('span', { class: 'econ-hero-value', text: value }),
+      el('span', { class: 'mini-tag', text: actionText })
     ]);
-    if (!stock.length) {
-      stockCard.appendChild(ui.emptyState('No hay vehículos en stock todavía.', '🚗'));
-    } else {
-      var stockList = el('div', { class: 'vehicle-list' });
-      stock.slice(0, 5).forEach(function (v) { stockList.appendChild(stockRow(v)); });
-      stockCard.appendChild(stockList);
-    }
-    wrap.appendChild(stockCard);
+  }
 
-    // --- Todos los vehículos: la lista completa con búsqueda/filtros de siempre ---
+  // Mismo componente visual "mini-stat" que ya usa Economía — se reutiliza acá.
+  function miniStatHome(label, value, sub, tone) {
+    return el('div', { class: 'mini-stat' }, [
+      el('span', { class: 'mini-stat-label', text: label }),
+      el('span', { class: 'mini-stat-value ' + (tone || ''), text: value }),
+      sub ? el('span', { class: 'mini-stat-sub', text: sub }) : null
+    ]);
+  }
+
+  /* --------------------- Listado completo de vehículos ----------------- */
+  // Mismo buscador/filtros/orden/listado que antes vivía dentro de "Inicio"
+  // (matchVehicle, sortVehicles, buildFiltersPanel, vehicleRow — sin cambios),
+  // ahora en su propia pantalla para no duplicar información en el dashboard.
+  function vehicleListView(root) {
+    var wrap = el('div', { class: 'page' });
+    wrap.appendChild(el('div', { class: 'page-head' }, [
+      el('div', {}, [
+        el('a', { class: 'back-link', href: '#/', html: '‹ Volver a Vehículos' }),
+        el('h1', { text: 'Todos los vehículos', style: 'margin-top:6px' })
+      ])
+    ]));
+
     var searchInput = ui.input({ value: filters.q, placeholder: 'Buscar por marca, modelo, año, patente, nombre...', class: 'input search-input' });
     searchInput.addEventListener('input', function () { filters.q = searchInput.value; renderList(); });
     var sortSel = ui.select([
@@ -156,7 +179,7 @@
     wrap.appendChild(filtersPanel);
 
     var listWrap = el('div', { class: 'vehicle-list' });
-    wrap.appendChild(el('div', { class: 'card', id: 'vehiculos-todos' }, [
+    wrap.appendChild(el('div', { class: 'card' }, [
       el('div', { class: 'card-head' }, [
         el('h3', { text: 'Todos los vehículos' }),
         el('span', { class: 'count-tag', id: 'veh-count' })
@@ -176,99 +199,6 @@
     renderList();
 
     root.appendChild(wrap);
-  }
-
-  function statCard(label, value, sub, icon, tone) {
-    return el('div', { class: 'stat-card' }, [
-      el('div', { class: 'stat-icon icon-' + icon }),
-      el('div', { class: 'stat-body' }, [
-        el('span', { class: 'stat-label', text: label }),
-        el('span', { class: 'stat-value ' + (tone || ''), text: value }),
-        el('span', { class: 'stat-sub', text: sub })
-      ])
-    ]);
-  }
-
-  // Mismo componente visual "mini-stat" que ya usa Economía — se reutiliza acá.
-  function miniStatHome(label, value, sub) {
-    return el('div', { class: 'mini-stat' }, [
-      el('span', { class: 'mini-stat-label', text: label }),
-      el('span', { class: 'mini-stat-value', text: value }),
-      sub ? el('span', { class: 'mini-stat-sub', text: sub }) : null
-    ]);
-  }
-
-  /* ------------------- Rendimiento del negocio (gráfico) --------------- */
-  // Reutiliza fin.monthlySeries(), la misma serie mensual que ya usan
-  // Resúmenes y la exportación a Excel — datos reales (compras, gastos y
-  // ventas ya registrados), sin ningún valor inventado.
-  function rendimientoCard() {
-    var meses = fin.monthlySeries(6);
-    var card = el('div', { class: 'card' }, [el('h3', { text: 'Rendimiento del negocio' })]);
-    var sinDatos = meses.every(function (m) { return !m.ganancias && !m.gastos && !m.gastosFijos; });
-    if (sinDatos) {
-      card.appendChild(ui.emptyState('Todavía no hay compras, gastos o ventas registrados para graficar.', '📈'));
-      return card;
-    }
-    card.appendChild(homeChart(meses));
-    card.appendChild(el('div', { class: 'chart-legend' }, [
-      el('span', { class: 'chart-legend-item' }, [el('span', { class: 'chart-dot chart-dot-ganancia' }), el('span', { text: 'Ganancias' })]),
-      el('span', { class: 'chart-legend-item' }, [el('span', { class: 'chart-dot chart-dot-gasto' }), el('span', { text: 'Gastos' })])
-    ]));
-    return card;
-  }
-
-  function homeChart(meses) {
-    var W = 640, H = 190, padSide = 8, padBottom = 24, padTop = 8;
-    var chartH = H - padTop - padBottom;
-    var zeroY = padTop + chartH / 2;
-    var maxVal = 1;
-    meses.forEach(function (m) { maxVal = Math.max(maxVal, m.ganancias, m.gastos + m.gastosFijos); });
-    var scale = (chartH / 2 - 4) / maxVal;
-    var slotW = (W - padSide * 2) / meses.length;
-    var barW = Math.max(10, Math.min(28, slotW * 0.3));
-
-    var parts = [];
-    parts.push('<line x1="' + padSide + '" y1="' + zeroY + '" x2="' + (W - padSide) + '" y2="' + zeroY + '" class="chart-axis" />');
-    meses.forEach(function (m, i) {
-      var cx = padSide + slotW * i + slotW / 2;
-      var gH = m.ganancias * scale;
-      var gastosTotal = m.gastos + m.gastosFijos;
-      var eH = gastosTotal * scale;
-      if (gH > 0.5) parts.push('<rect x="' + (cx - barW - 2).toFixed(1) + '" y="' + (zeroY - gH).toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + gH.toFixed(1) + '" rx="3" class="chart-bar-ganancia" />');
-      if (eH > 0.5) parts.push('<rect x="' + (cx + 2).toFixed(1) + '" y="' + zeroY.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + eH.toFixed(1) + '" rx="3" class="chart-bar-gasto" />');
-      parts.push('<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="chart-month-label">' + escXml(m.label) + '</text>');
-    });
-
-    var svgWrap = el('div', { class: 'home-chart' });
-    svgWrap.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ganancias y gastos de los últimos meses">' + parts.join('') + '</svg>';
-    return svgWrap;
-  }
-  function escXml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
-  // Fila "protagonista" para el stock destacado de Inicio (más espaciosa que
-  // vehicleRow, mismos datos: store.vehicleName, fin.vehicleMetrics, badges
-  // y navegación existentes — nada nuevo).
-  function stockRow(v) {
-    var m = fin.vehicleMetrics(v);
-    return el('a', { class: 'home-stock-row', href: '#/vehiculo/' + v.id }, [
-      el('div', { class: 'row-thumb' }, ui.carIcon()),
-      el('div', { class: 'home-stock-main' }, [
-        el('div', { class: 'home-stock-top' }, [
-          el('span', { class: 'row-name', text: store.vehicleName(v) }),
-          el('span', { class: 'home-stock-value', text: fmt.money(m.costoTotalARS) })
-        ]),
-        el('div', { class: 'home-stock-badges' }, [
-          ui.estadoBadge(v.estado),
-          v.documentacion && v.documentacion !== 'completa' ? ui.docBadge(v.documentacion) : null,
-          v.patente ? el('span', { class: 'row-patente', text: v.patente }) : null
-        ]),
-        el('div', { class: 'home-stock-meta' }, [
-          v.purchase ? el('span', { text: 'Compra: ' + fmt.money(v.purchase.precio, v.purchase.moneda) }) : null,
-          m.diasEnStock != null ? el('span', { text: fmt.days(m.diasEnStock) + ' en stock' }) : null
-        ])
-      ])
-    ]);
   }
 
   function vehicleRow(v) {
@@ -858,6 +788,7 @@
   window.App = window.App || {};
   App.views = App.views || {};
   App.views.dashboard = dashboard;
+  App.views.vehicleList = vehicleListView;
   App.views.vehicleDetail = vehicleDetail;
   App.views.vehicleRow = vehicleRow;
   App.views._dl = dl;
