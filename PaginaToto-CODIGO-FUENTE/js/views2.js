@@ -388,10 +388,7 @@
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
         el('h1', { text: 'Economía' }),
-        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas y comparación del dólar' })
-      ]),
-      el('div', { class: 'page-head-actions' }, [
-        el('a', { class: 'btn btn-ghost', href: '#/resumenes', html: '<span>🧮</span> Resúmenes' })
+        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas, comparación del dólar y resúmenes' })
       ])
     ]));
 
@@ -399,7 +396,8 @@
       ['situacion', 'Situación económica', finanzasView],
       ['gastos', 'Gastos del negocio', gastosNegocioView],
       ['cuotas', 'Cuotas y cobros', cuotasView],
-      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }]
+      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }],
+      ['resumenes', 'Resúmenes', resumenesView]
     ];
     var tabsWrap = el('div', { class: 'tabs' });
     var panel = el('div', { class: 'tab-panel' });
@@ -426,60 +424,90 @@
   }
 
   /* =============================== FINANZAS =========================== */
-  // ("Situación económica" dentro de Economía — misma lógica y datos de siempre)
+  // ("Situación económica" dentro de Economía). Dashboard financiero: reusa
+  // exactamente fin.globalMetrics()/fin.vehicleMetrics() — ningún cálculo
+  // nuevo, solo se reorganiza cómo se presentan los mismos números.
   function finanzasView(root) {
     var g = fin.globalMetrics();
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Situación económica', 'Situación económica de cada vehículo y del negocio'));
+    var wrap = el('div', { class: 'page econ-dashboard' });
+    wrap.appendChild(pageHead('Situación económica', 'Cómo está el negocio, de un vistazo'));
 
-    wrap.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
-      miniStat('Capital invertido en stock', fmt.money(g.capitalInvertido)),
-      miniStat('Valor estimado del stock', fmt.money(g.valorEstimadoStock)),
-      miniStat('Ganancia por autos vendidos', fmt.money(g.gananciaTotal), g.gananciaTotal >= 0 ? 'pos' : 'neg'),
-      miniStat('Gastos fijos del negocio', fmt.money(g.gastosFijosTotales)),
-      miniStat('RESULTADO DEL NEGOCIO', fmt.money(g.resultadoNegocio), g.resultadoNegocio >= 0 ? 'pos' : 'neg'),
-      miniStat('Ganancia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg'),
-      miniStat('Te tienen que pagar (cuotas)', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
-      miniStat('Tenés que pagar (cuotas)', fmt.money(g.porPagarCuotas), g.porPagarVencido ? 'neg' : '')
+    // --- Lo más importante: resultado del negocio ---
+    wrap.appendChild(el('div', { class: 'econ-hero' }, [
+      el('span', { class: 'econ-hero-label', text: 'Resultado del negocio' }),
+      el('span', { class: 'econ-hero-value ' + (g.resultadoNegocio >= 0 ? 'pos' : 'neg'), text: (g.resultadoNegocio >= 0 ? '+' : '') + fmt.money(g.resultadoNegocio) }),
+      el('span', { class: 'econ-hero-sub', text: 'Ganancia por autos vendidos − gastos fijos del negocio' })
     ]));
 
-    wrap.appendChild(el('div', { class: 'grid-3 highlight-grid' }, [
-      highlight('Mayor ganancia', g.mayorGanancia, function (x) { return fmt.money(x.m.gananciaARS); }),
-      highlight('Menor ganancia', g.menorGanancia, function (x) { return fmt.money(x.m.gananciaARS); }),
-      highlight('Más tiempo en stock', g.masTiempoStock, function (x) { return fmt.days(x.m.diasEnStock); }),
-      highlight('Vendido más rápido', g.vendidoMasRapido, function (x) { return fmt.days(x.m.diasEnStock); }),
-      highlight('Mayor venta', g.mayorVenta, function (x) { return fmt.money(x.m.ventaARS); }),
-      g.mayorGasto ? el('div', { class: 'card highlight' }, [
-        el('span', { class: 'highlight-label', text: 'Mayor gasto' }),
-        el('a', { class: 'highlight-name', href: '#/vehiculo/' + g.mayorGasto.vehicle.id, text: store.vehicleName(g.mayorGasto.vehicle) }),
-        el('span', { class: 'highlight-value', text: fmt.money(g.mayorGasto.ars) }),
-        el('span', { class: 'highlight-sub', text: g.mayorGasto.expense.observacion || '' })
-      ]) : null
+    // --- Tres métricas principales, más discretas que el resultado ---
+    wrap.appendChild(el('div', { class: 'grid-3' }, [
+      miniStat('Capital en stock', fmt.money(g.capitalInvertido)),
+      miniStat('Valor del stock', fmt.money(g.valorEstimadoStock)),
+      miniStat('Ganancia obtenida', fmt.money(g.gananciaTotal), g.gananciaTotal >= 0 ? 'pos' : 'neg')
     ]));
 
-    // tabla por vehículo
-    var table = el('table', { class: 'data-table finance-table' });
-    table.appendChild(el('thead', {}, el('tr', {}, ['Vehículo', 'Compra', 'Gastos', 'Comisión', 'Lo que puse', 'Venta', 'Ganancia', 'Rent.', 'Estado', 'Días', 'Cuotas pend.', 'Parte de pago'].map(function (h) { return el('th', { text: h }); }))));
-    var tb = el('tbody');
-    store.activeVehicles().slice().sort(function (a, b) { return b.createdAt - a.createdAt; }).forEach(function (v) {
-      var m = fin.vehicleMetrics(v);
-      tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
-        el('td', {}, el('span', { class: 'cell-name', text: store.vehicleName(v) })),
-        el('td', { text: v.purchase ? fmt.money(m.compraARS) : '—' }),
-        el('td', { text: fmt.money(m.gastosARS) }),
-        el('td', { text: m.comisionARS ? fmt.money(m.comisionARS) : '—' }),
-        el('td', { text: fmt.money(m.costoTotalARS) }),
-        el('td', { text: m.vendido ? fmt.money(m.ventaARS) : '—' }),
-        el('td', { class: m.vendido ? (m.gananciaARS >= 0 ? 'pos' : 'neg') : 'muted', text: m.vendido ? fmt.money(m.gananciaARS) : 'Todavía no vendido' }),
-        el('td', { class: m.vendido ? (m.gananciaARS >= 0 ? 'pos' : 'neg') : 'muted', text: m.vendido ? fmt.pct(m.rentabilidad) : '—' }),
-        el('td', {}, ui.estadoBadge(v.estado)),
-        el('td', { text: m.diasEnStock != null ? m.diasEnStock : '—' }),
-        el('td', { class: m.cuotasPendientesARS ? 'neg' : 'muted', text: m.cuotasPendientesARS ? fmt.money(m.cuotasPendientesARS) + ' (' + m.cuotasPendientesCount + ')' : '—' }),
-        el('td', { text: (v.sale && v.sale.tradeIn) ? fmt.money(v.sale.tradeIn.valor, v.sale.tradeIn.moneda) + (v.sale.diferencia ? ' + dif ' + fmt.money(v.sale.diferencia.monto, v.sale.diferencia.moneda) : '') : '—' })
-      ]));
-    });
-    table.appendChild(tb);
-    wrap.appendChild(el('div', { class: 'card' }, [el('h3', { text: 'Detalle por vehículo' }), el('div', { class: 'table-wrap' }, table)]));
+    // --- Stock: qué vehículos tiene y cuánto valen ---
+    var enStock = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
+      .sort(function (a, b) { return b.createdAt - a.createdAt; });
+    var stockCard = el('div', { class: 'card' }, [
+      el('div', { class: 'card-head' }, [
+        el('h3', { text: '🚗 Stock' }),
+        el('span', { class: 'count-tag', text: g.autosEnStock + ' de ' + g.totalVehiculos })
+      ]),
+      el('p', { class: 'form-help', text: g.autosEnStock + ' vehículo' + (g.autosEnStock === 1 ? '' : 's') + ' en stock · ' + fmt.money(g.capitalInvertido) + ' invertidos' })
+    ]);
+    if (!enStock.length) {
+      stockCard.appendChild(ui.emptyState('No hay vehículos en stock.', '🚗'));
+    } else {
+      var stockTable = el('table', { class: 'data-table' });
+      stockTable.appendChild(el('thead', {}, el('tr', {}, ['Vehículo', 'Inversión', 'Valor estimado', 'Diferencia'].map(function (h) { return el('th', { text: h }); }))));
+      var stb = el('tbody');
+      enStock.forEach(function (v) {
+        var m = fin.vehicleMetrics(v);
+        var dif = m.estimadoARS - m.costoTotalARS;
+        stb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
+          el('td', {}, el('span', { class: 'cell-name', text: store.vehicleName(v) })),
+          el('td', { text: fmt.money(m.costoTotalARS) }),
+          el('td', { text: fmt.money(m.estimadoARS) }),
+          el('td', { class: dif >= 0 ? 'pos' : 'neg', text: (dif >= 0 ? '+' : '') + fmt.money(dif) })
+        ]));
+      });
+      stockTable.appendChild(stb);
+      stockCard.appendChild(el('div', { class: 'table-wrap' }, stockTable));
+    }
+    wrap.appendChild(stockCard);
+
+    // --- Rendimiento: mismos indicadores que ya calculaba la app, en filas compactas ---
+    var perfItems = [
+      ['Mayor ganancia', g.mayorGanancia, function (x) { return fmt.money(x.m.gananciaARS); }],
+      ['Venta más rápida', g.vendidoMasRapido, function (x) { return fmt.days(x.m.diasEnStock); }],
+      ['Más tiempo en stock', g.masTiempoStock, function (x) { return fmt.days(x.m.diasEnStock); }],
+      ['Mayor venta', g.mayorVenta, function (x) { return fmt.money(x.m.ventaARS); }]
+    ];
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('h3', { text: '📈 Rendimiento' }),
+      el('div', { class: 'perf-list' }, perfItems.map(function (it) {
+        var label = it[0], w = it[1], valFn = it[2];
+        return el('div', { class: 'perf-row' }, [
+          el('span', { class: 'perf-label', text: label }),
+          w && w.v
+            ? el('a', { class: 'perf-name', href: '#/vehiculo/' + w.v.id, text: store.vehicleName(w.v) })
+            : el('span', { class: 'perf-name muted', text: '—' }),
+          el('span', { class: 'perf-value', text: w && w.v ? valFn(w) : '—' })
+        ]);
+      }))
+    ]));
+
+    // --- Pendientes: cuotas por cobrar/pagar, gastos fijos y diferencia en USD ---
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('h3', { text: '💰 Pendientes' }),
+      el('div', { class: 'grid-2' }, [
+        miniStat('Por cobrar', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
+        miniStat('Por pagar', fmt.money(g.porPagarCuotas), g.porPagarVencido ? 'neg' : ''),
+        miniStat('Gastos del negocio', fmt.money(g.gastosFijosTotales)),
+        miniStat('Diferencia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg')
+      ])
+    ]));
 
     root.appendChild(wrap);
   }

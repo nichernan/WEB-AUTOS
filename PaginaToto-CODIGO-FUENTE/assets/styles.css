@@ -234,6 +234,23 @@ img { max-width: 100%; display: block; }
 .muted { color: var(--c-text-mute); }
 .strong { font-weight: 700; }
 
+/* ==================== Economía: dashboard financiero ============== */
+.econ-hero {
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius);
+  padding: 22px 26px; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.econ-hero-label { font-size: .8rem; color: var(--c-text-mute); font-weight: 650; text-transform: uppercase; letter-spacing: .03em; }
+.econ-hero-value { font-size: 2.3rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
+.econ-hero-sub { font-size: .8rem; color: var(--c-text-mute); margin-top: 2px; }
+
+.perf-list { display: flex; flex-direction: column; }
+.perf-row { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--c-border); }
+.perf-row:last-child { border-bottom: none; }
+.perf-label { flex: 0 0 148px; font-size: .82rem; color: var(--c-text-mute); }
+.perf-name { flex: 1; min-width: 0; font-weight: 650; font-size: .92rem; color: var(--c-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perf-value { flex: 0 0 auto; font-weight: 700; font-size: .95rem; text-align: right; white-space: nowrap; }
+
 /* ============================== Toolbar ========================== */
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .toolbar-search { flex: 1; min-width: 200px; }
@@ -615,6 +632,13 @@ details.card[open] > summary { margin-bottom: 10px; }
   .hide-sm { display: none; }
   h1 { font-size: 1.3rem; }
   .filters-grid { grid-template-columns: 1fr; }
+
+  /* Economía: hero y filas de rendimiento más cómodos en celular */
+  .econ-hero { padding: 18px 18px; }
+  .econ-hero-value { font-size: 1.7rem; }
+  .perf-row { flex-wrap: wrap; row-gap: 2px; }
+  .perf-label { flex: 1 1 100%; }
+  .perf-name { flex: 1 1 auto; }
 
   /* Stat cards compactos en 2 columnas (menos scroll, más cómodo) */
   .stat-grid, .stat-grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
