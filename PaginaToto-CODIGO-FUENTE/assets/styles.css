@@ -308,10 +308,41 @@ img { max-width: 100%; display: block; }
 }
 .detail-hero-photo img { width: 100%; height: 100%; object-fit: cover; }
 .detail-hero-photo.no-photo span { font-size: 2rem; opacity: .4; }
-.detail-titles h1 { margin-bottom: 6px; }
-.detail-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.detail-patente { font-family: ui-monospace, monospace; background: var(--c-surface-2); padding: 3px 9px; border-radius: 7px; font-size: .82rem; }
-.detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.detail-titles h1 { margin-bottom: 4px; }
+.detail-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.detail-patente { display: inline-block; font-family: ui-monospace, monospace; background: var(--c-surface-2); padding: 3px 9px; border-radius: 7px; font-size: .82rem; color: var(--c-text-mute); }
+.detail-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.detail-invest { display: flex; flex-direction: column; gap: 2px; }
+.detail-invest-value { font-size: 1.7rem; font-weight: 750; line-height: 1.1; }
+.detail-invest-label { font-size: .82rem; color: var(--c-text-mute); }
+
+/* menú "⋯" de acciones secundarias de la ficha */
+.more-menu-wrap { position: relative; }
+.more-btn { font-size: 1.2rem; line-height: 1; padding: 8px 12px; border: 1px solid var(--c-border-strong); border-radius: var(--radius-sm); }
+.more-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  min-width: 190px; background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-md, 0 10px 30px rgba(0,0,0,.18));
+  display: flex; flex-direction: column; padding: 6px; gap: 2px;
+}
+.more-menu-item {
+  text-align: left; padding: 9px 11px; border-radius: 7px; font-size: .88rem;
+  color: var(--c-text); background: transparent; white-space: nowrap;
+}
+.more-menu-item:hover { background: var(--c-surface-2); }
+.more-menu-item.is-danger { color: var(--c-danger); }
+
+/* checklist en modo lectura (Resumen) */
+.checklist-glance { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; }
+.checklist-glance-item { display: flex; align-items: center; gap: 7px; font-size: .86rem; color: var(--c-text-soft); }
+.checklist-glance-item.is-ok { color: var(--c-success); }
+.checklist-glance-item span:first-child { width: 16px; text-align: center; flex-shrink: 0; }
+
+/* página de registrar / editar vehículo */
+.vehicle-form-page { max-width: 760px; }
+.vehicle-form-page h1 { margin: 2px 0 4px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .detail-alerts { display: flex; flex-direction: column; gap: 6px; }
 .alert-line {
   display: flex; align-items: center; gap: 9px; font-size: .85rem;
@@ -577,6 +608,10 @@ details.card[open] > summary { margin-bottom: 10px; }
   .detail-head-main { flex-direction: column; align-items: flex-start; }
   .detail-actions { width: 100%; }
   .detail-actions .btn { flex: 1; }
+  .detail-invest-value { font-size: 1.45rem; }
+  .form-actions { flex-direction: column-reverse; }
+  .form-actions .btn { width: 100%; }
+  .checklist-glance { grid-template-columns: 1fr; }
   .hide-sm { display: none; }
   h1 { font-size: 1.3rem; }
   .filters-grid { grid-template-columns: 1fr; }

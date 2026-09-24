@@ -81,7 +81,7 @@
       el('button', { class: 'icon-btn menu-toggle', html: '☰', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }),
       el('div', { class: 'topbar-brand', text: 'PaginaToto' }),
       el('div', { class: 'topbar-search-wrap' }, searchEl),
-      el('button', { class: 'btn btn-primary btn-add-top', html: '<span>＋</span><span class="hide-sm">Vehículo</span>', 'aria-label': 'Registrar vehículo', onclick: function () { App.forms.vehicleForm(); } })
+      el('button', { class: 'btn btn-primary btn-add-top', html: '<span>＋</span><span class="hide-sm">Vehículo</span>', 'aria-label': 'Registrar vehículo', onclick: function () { App.router.go('vehiculo-nuevo'); } })
     ]);
 
     var backdrop = el('div', { class: 'sidebar-backdrop', onclick: function () { document.body.classList.remove('sidebar-open'); } });
@@ -127,6 +127,8 @@
       switch (p.name) {
         case '': App.views.dashboard(mainEl); break;
         case 'vehiculo': App.views.vehicleDetail(mainEl, p.param); break;
+        case 'vehiculo-nuevo': App.forms.vehicleFormView(mainEl); break;
+        case 'vehiculo-editar': App.forms.vehicleFormView(mainEl, p.param); break;
         case 'economia': case 'finanzas': App.views.economia(mainEl); break;
         case 'gastos-negocio': App.views.gastosNegocio(mainEl); break;
         case 'cuotas': App.views.cuotas(mainEl); break;

@@ -956,7 +956,7 @@
         var c = it.cuota;
         var pillCls = (it.estado === 'pagada' || it.estado === 'cobrada') ? 'pill-ok' : (it.estado === 'vencida' ? 'pill-danger' : 'pill-warn');
         var pillTxt = it.estado.charAt(0).toUpperCase() + it.estado.slice(1);
-        tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + it.vehicle.id + '?tab=' + (tipo === 'pagar' ? 'compra' : 'venta')); } }, [
+        tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + it.vehicle.id + '?tab=economia'); } }, [
           el('td', { text: store.vehicleName(it.vehicle) }),
           el('td', { text: c.numero }),
           el('td', { text: fmt.money(c.monto, it.moneda) }),

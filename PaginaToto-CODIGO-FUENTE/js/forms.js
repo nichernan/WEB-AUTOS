@@ -109,10 +109,19 @@
     };
   }
 
-  /* ============================ FORM VEHÍCULO ============================ */
-  function vehicleForm(vehicle) {
-    var isEdit = !!vehicle;
-    var v = vehicle || {};
+  /* ===================== PÁGINA: REGISTRAR / EDITAR VEHÍCULO ============= */
+  // Antes era un modal grande con scroll interno; ahora es una página completa
+  // (misma app, solo mejor organizada). Sigue usando EXACTAMENTE las mismas
+  // funciones de guardado de siempre:
+  //   - store.createVehicle / store.updateVehicle para los datos del vehículo
+  //     (mismos campos, misma validación, mismo checklist).
+  //   - store.setPurchase (la misma función que usa "Editar compra" en la
+  //     ficha) si se completa la compra en el mismo paso al registrar.
+  // No se creó ninguna función de guardado nueva.
+  function vehicleFormView(root, vehicleId) {
+    var existing = vehicleId ? store.getVehicle(vehicleId) : null;
+    var isEdit = !!existing;
+    var v = existing || {};
 
     var fMarca = ui.input({ value: v.marca || '', required: true, placeholder: 'Toyota' });
     var fModelo = ui.input({ value: v.modelo || '', required: true, placeholder: 'Corolla' });
@@ -135,39 +144,81 @@
       return el('label', { class: 'check-item' }, [cb, el('span', { text: it[1] })]);
     }));
 
-    var body = el('div', { class: 'form-grid' }, [
-      el('div', { class: 'form-section-title', text: 'Información básica' }),
-      el('div', { class: 'grid-2' }, [
-        ui.field('Marca *', fMarca),
-        ui.field('Modelo *', fModelo),
-        ui.field('Año', fAnio),
-        ui.field('Patente', fPatente),
-        ui.field('Kilometraje al comprarlo', fKm),
-        ui.field('Combustible', fComb),
-        ui.field('Tipo de caja', fCaja),
-        ui.field('Versión', fVersion)
-      ]),
-      el('div', { class: 'form-section-title', text: 'Estado y documentación' }),
-      el('div', { class: 'grid-2' }, [
-        ui.field('Estado', fEstado),
-        ui.field('Documentación', fDoc),
-        ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock')
-      ]),
-      el('div', { class: 'form-section-title', text: 'Observaciones generales' }),
-      ui.field('', fObs),
-      el('div', { class: 'form-section-title', text: 'Checklist (opcional)' }),
-      checkGrid
-    ]);
+    // --- Compra (opcional, solo al REGISTRAR un vehículo nuevo). Reutiliza
+    // los mismos componentes que "Editar compra" (cuotaBuilder, moneda,
+    // forma de pago). Para editar una compra ya cargada se sigue usando
+    // "Editar compra" desde la ficha, como siempre. ---
+    var precio, pFecha, pForma, pTransf, pEfec, pMixtoBox, pCuotas, pProvNom, pProvTel, compraCard;
+    if (!isEdit) {
+      pFecha = ui.input({ type: 'date', value: store.todayISO() });
+      precio = ui.money2('compraPrecio', '', 'ARS');
+      pForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], 'transferencia');
+      pTransf = ui.input({ inputmode: 'decimal', placeholder: 'Monto transferencia' });
+      pEfec = ui.input({ inputmode: 'decimal', placeholder: 'Monto efectivo' });
+      pMixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', pTransf), ui.field('Monto en efectivo', pEfec)]);
+      pCuotas = cuotaBuilder(function () { return precio.moneda.value; }, {});
+      pProvNom = ui.input({ placeholder: 'Nombre (opcional)' });
+      pProvTel = ui.input({ placeholder: 'Teléfono (opcional)' });
 
-    var m = ui.modal({
-      title: isEdit ? 'Editar vehículo' : 'Registrar vehículo',
-      size: 'lg',
-      body: body,
-      footer: [
-        el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { m.close(); } }),
+      var syncPForma = function () {
+        var f = pForma.value;
+        pMixtoBox.hidden = f !== 'mixto';
+        pCuotas.section.hidden = f !== 'cuotas';
+      };
+      pForma.addEventListener('change', syncPForma);
+      syncPForma();
+
+      compraCard = el('div', { class: 'card' }, [
+        el('h3', { text: 'Compra' }),
+        el('p', { class: 'form-help', text: 'Opcional: si todavía no la tenés, la podés cargar después desde la ficha ("Registrar compra").' }),
+        el('div', { class: 'form-grid' }, [
+          el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', pFecha)]),
+          ui.field('Forma de pago', pForma),
+          pMixtoBox,
+          pCuotas.section,
+          el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', pProvNom), ui.field('Teléfono', pProvTel)])
+        ])
+      ]);
+    }
+
+    var page = el('div', { class: 'page vehicle-form-page' }, [
+      el('a', { class: 'back-link', href: isEdit ? '#/vehiculo/' + v.id : '#/', html: '‹ Volver' }),
+      el('h1', { text: isEdit ? 'Editar vehículo' : 'Registrar vehículo' }),
+
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Información del vehículo' }),
+        el('div', { class: 'grid-2' }, [
+          ui.field('Marca *', fMarca), ui.field('Modelo *', fModelo),
+          ui.field('Año', fAnio), ui.field('Patente', fPatente),
+          ui.field('Kilometraje', fKm), ui.field('Combustible', fComb),
+          ui.field('Tipo de caja', fCaja), ui.field('Versión', fVersion)
+        ])
+      ]),
+
+      compraCard,
+
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Estado' }),
+        el('div', { class: 'grid-2' }, [ui.field('Estado', fEstado), ui.field('Documentación', fDoc)])
+      ]),
+
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Información adicional' }),
+        el('div', { class: 'grid-2' }, [ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock')]),
+        ui.field('Observaciones', fObs)
+      ]),
+
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Checklist' }),
+        el('p', { class: 'form-help', text: 'Revisión del vehículo (opcional)' }),
+        checkGrid
+      ]),
+
+      el('div', { class: 'form-actions' }, [
+        el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { App.router.go(isEdit ? 'vehiculo/' + v.id : ''); } }),
         el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar cambios' : 'Registrar vehículo', onclick: submit })
-      ]
-    });
+      ])
+    ]);
 
     var submitted = false;
     function submit() {
@@ -184,16 +235,24 @@
       if (isEdit) {
         store.updateVehicle(v.id, data);
         ui.toast('Vehículo actualizado', 'success');
-      } else {
-        var nv = store.createVehicle(data);
-        ui.toast('Vehículo registrado', 'success');
-        m.close();
-        App.router.go('vehiculo/' + nv.id);
+        App.router.go('vehiculo/' + v.id);
         return;
       }
-      m.close();
+      var nv = store.createVehicle(data);
+      if (precio && store.num(precio.monto.value) > 0) {
+        store.setPurchase(nv.id, {
+          fecha: pFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
+          formaPago: pForma.value,
+          montoTransferencia: pTransf.value, montoEfectivo: pEfec.value,
+          cuotas: pForma.value === 'cuotas' ? pCuotas.getCuotas() : [],
+          proveedor: { nombre: pProvNom.value, telefono: pProvTel.value, notas: '' }
+        });
+      }
+      ui.toast('Vehículo registrado', 'success');
+      App.router.go('vehiculo/' + nv.id);
     }
-    return m;
+
+    root.appendChild(page);
   }
 
   /* ============================ FORM COMPRA ============================= */
@@ -689,7 +748,7 @@
 
   window.App = window.App || {};
   App.forms = {
-    vehicleForm: vehicleForm, purchaseForm: purchaseForm, saleForm: saleForm, expenseForm: expenseForm,
+    vehicleFormView: vehicleFormView, purchaseForm: purchaseForm, saleForm: saleForm, expenseForm: expenseForm,
     reservationForm: reservationForm, fixedExpenseForm: fixedExpenseForm,
     reminderForm: reminderForm, CHECKLIST_ITEMS: CHECKLIST_ITEMS,
     REM_TIPOS: REM_TIPOS, REM_REPEAT: REM_REPEAT, GASTO_CATS: GASTO_CATS

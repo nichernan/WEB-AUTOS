@@ -76,7 +76,7 @@
           el('span', { text: 'Alertas' }),
           alertN ? el('span', { class: 'btn-alertas-badge', text: alertN }) : null
         ]),
-        el('button', { class: 'btn btn-primary', onclick: function () { App.forms.vehicleForm(); }, html: '<span>＋</span> Registrar vehículo' })
+        el('a', { class: 'btn btn-primary', href: '#/vehiculo-nuevo', html: '<span>＋</span> Registrar vehículo' })
       ])
     ]));
 
@@ -231,11 +231,48 @@
   // esto, cualquier actualización de datos mientras se mira una pestaña que
   // no sea "Resumen" hacía volver la ficha a "Resumen" sin que el usuario lo pida.
   var lastDetailTab = { id: null, tab: null };
+  // Menú "⋯" con acciones secundarias (mismas acciones de siempre, solo
+  // agrupadas para reducir el ruido visual de la ficha).
+  function moreMenu(items) {
+    items = items.filter(Boolean);
+    var btn = el('button', { class: 'icon-btn more-btn', html: '⋯', 'aria-label': 'Más acciones', title: 'Más acciones' });
+    var menu = el('div', { class: 'more-menu', hidden: true }, items.map(function (it) {
+      return el('button', { class: 'more-menu-item' + (it.danger ? ' is-danger' : ''), text: it.text, onclick: function () { close(); it.onclick(); } });
+    }));
+    function onDocClick(e) { if (!wrapEl.contains(e.target)) close(); }
+    function close() { menu.hidden = true; document.removeEventListener('mousedown', onDocClick); }
+    function open() { menu.hidden = false; document.addEventListener('mousedown', onDocClick); }
+    btn.addEventListener('click', function (e) { e.stopPropagation(); if (menu.hidden) open(); else close(); });
+    var wrapEl = el('div', { class: 'more-menu-wrap' }, [btn, menu]);
+    return wrapEl;
+  }
+
   function vehicleDetail(root, id) {
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
     var m = fin.vehicleMetrics(v);
     var wrap = el('div', { class: 'page vehicle-detail' });
+
+    // acción principal: registrar compra (si falta) o registrar venta (si ya
+    // se puede vender); "Agregar gasto" siempre visible. El resto de las
+    // acciones (antes todas sueltas acá arriba) quedan en el menú "⋯".
+    var primaryActions = [];
+    if (!v.purchase) {
+      primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }));
+    } else if (v.estado !== 'vendido') {
+      primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }));
+    }
+    primaryActions.push(el('button', { class: 'btn btn-sm btn-ghost', text: 'Agregar gasto', onclick: function () { App.forms.expenseForm(v.id); } }));
+
+    var secondary = moreMenu([
+      { text: 'Editar', onclick: function () { App.router.go('vehiculo-editar/' + v.id); } },
+      (v.purchase && v.estado !== 'vendido') ? { text: v.reservation ? 'Editar reserva' : 'Reservar', onclick: function () { App.forms.reservationForm(v.id); } } : null,
+      { text: 'Comparar dólar', onclick: function () { App.router.go('comparacion/' + v.id); } },
+      { text: 'Papelera', danger: true, onclick: function () {
+        ui.confirm({ title: 'Enviar a papelera', message: '¿Seguro que querés eliminar este vehículo? Se moverá a la Papelera y podrás restaurarlo.', danger: true, confirmText: 'Enviar a papelera' })
+          .then(function (ok) { if (ok) { store.softDeleteVehicle(v.id); ui.toast('Movido a la papelera', 'success'); App.router.go(''); } });
+      } }
+    ]);
 
     // header
     wrap.appendChild(el('div', { class: 'detail-head' }, [
@@ -244,25 +281,18 @@
         el('div', { class: 'detail-hero-photo' }, ui.carIcon('big')),
         el('div', { class: 'detail-titles' }, [
           el('h1', { text: store.vehicleName(v) }),
+          el('div', { class: 'detail-patente', text: v.patente || 'Sin patente' }),
           el('div', { class: 'detail-sub' }, [
             ui.estadoBadge(v.estado), ui.docBadge(v.documentacion),
-            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null,
-            el('span', { class: 'detail-patente', text: v.patente || 'Sin patente' })
+            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null
           ])
         ])
       ]),
-      el('div', { class: 'detail-actions' }, [
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar', onclick: function () { App.forms.vehicleForm(v); } }),
-        !v.purchase ? el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }) : null,
-        v.purchase && v.estado !== 'vendido' ? el('button', { class: 'btn btn-sm btn-ghost', text: v.reservation ? 'Editar reserva' : 'Reservar', onclick: function () { App.forms.reservationForm(v.id); } }) : null,
-        v.purchase && v.estado !== 'vendido' ? el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }) : null,
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Agregar gasto', onclick: function () { App.forms.expenseForm(v.id); } }),
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Comparar dólar', onclick: function () { App.router.go('comparacion/' + v.id); } }),
-        el('button', { class: 'btn btn-sm btn-danger-ghost', text: 'Papelera', onclick: function () {
-          ui.confirm({ title: 'Enviar a papelera', message: '¿Seguro que querés eliminar este vehículo? Se moverá a la Papelera y podrás restaurarlo.', danger: true, confirmText: 'Enviar a papelera' })
-            .then(function (ok) { if (ok) { store.softDeleteVehicle(v.id); ui.toast('Movido a la papelera', 'success'); App.router.go(''); } });
-        } })
-      ])
+      el('div', { class: 'detail-invest' }, [
+        el('span', { class: 'detail-invest-value', text: fmt.money(m.costoTotalARS) }),
+        el('span', { class: 'detail-invest-label', text: 'Inversión actual' })
+      ]),
+      el('div', { class: 'detail-actions' }, primaryActions.concat([secondary]))
     ]));
 
     if (v.reservation) {
@@ -287,26 +317,18 @@
       })));
     }
 
-    // KPIs
-    wrap.appendChild(el('div', { class: 'kpi-row' }, [
-      kpi('Lo que puse', fmt.money(m.costoTotalARS), m.comisionARS ? 'incluye ' + fmt.money(m.comisionARS) + ' de comisión' : (m.gastosARS ? 'compra + ' + fmt.money(m.gastosARS) + ' de gastos' : 'compra')),
-      kpi('Precio de venta', m.vendido ? fmt.money(m.ventaARS) : '—', m.vendido && m.ventaUSD ? fmt.usd(m.ventaUSD) : (m.vendido ? '' : 'Todavía no vendido')),
-      kpi('Ganancia', m.vendido ? ((m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS)) : '—', m.vendido ? fmt.pct(m.rentabilidad) + ' de rentabilidad' : '', m.vendido ? (m.gananciaARS >= 0 ? 'pos' : 'neg') : ''),
-      kpi('Tiempo en stock', fmt.days(m.diasEnStock), v.purchase ? (m.vendido ? 'comprado ' + fmt.date(v.purchase.fecha) : 'desde ' + fmt.date(v.purchase.fecha)) : 'sin compra registrada')
-    ]));
-
-    // tabs
+    // tabs — reducidas a 4 secciones conceptuales. No se perdió ninguna
+    // funcionalidad: Compra + Gastos + Venta + Rentabilidad ahora viven
+    // juntas dentro de "Economía" (mismas funciones tabCompra/tabGastos/
+    // tabVenta/tabRentabilidad, solo concatenadas); Documentación + Checklist
+    // viven juntas dentro de "Documentación" (mismas tabDocs/tabChecklist).
+    // Observaciones se movió a Resumen (ver tabResumen) y ya no es pestaña propia.
     var tabsWrap = el('div', { class: 'tabs' });
     var panel = el('div', { class: 'tab-panel' });
     var tabs = [
       ['resumen', 'Resumen', function () { return tabResumen(v, m); }],
-      ['compra', 'Compra', function () { return tabCompra(v, m); }],
-      ['gastos', 'Gastos (' + (v.expenses || []).length + ')', function () { return tabGastos(v, m); }],
-      ['venta', 'Venta', function () { return tabVenta(v, m); }],
-      ['rentabilidad', 'Rentabilidad', function () { return tabRentabilidad(v, m); }],
-      ['docs', 'Documentación', function () { return tabDocs(v); }],
-      ['checklist', 'Checklist', function () { return tabChecklist(v); }],
-      ['obs', 'Observaciones', function () { return tabObs(v); }],
+      ['economia', 'Economía', function () { return tabEconomia(v, m); }],
+      ['docs', 'Documentación', function () { return tabDocumentacion(v); }],
       ['hist', 'Historial', function () { return tabHist(v); }]
     ];
     var hashTab = (location.hash.split('?')[1] || '').indexOf('tab=') === 0 ? location.hash.split('tab=')[1] : null;
@@ -366,24 +388,22 @@
     return el('div', { class: 'card info-card' }, [
       el('h4', { text: '🔁 Origen: parte de pago' }),
       dl(rows),
-      orig ? el('a', { class: 'btn btn-sm btn-primary', href: '#/vehiculo/' + orig.id + '?tab=venta', text: 'Ver operación' }) : null
+      orig ? el('a', { class: 'btn btn-sm btn-primary', href: '#/vehiculo/' + orig.id + '?tab=economia', text: 'Ver operación' }) : null
     ]);
   }
 
+  // Resumen: para entenderse en pocos segundos. Junta, en modo lectura, lo
+  // esencial de cada sección (los mismos datos y cálculos de siempre — nada
+  // se recalcula acá; el detalle interactivo completo sigue en Economía /
+  // Documentación).
   function tabResumen(v, m) {
     var out = [];
     out.push(el('div', { class: 'grid-2' }, [
-      el('div', { class: 'card' }, [el('h4', { text: 'Datos del vehículo' }), dl([
-        ['Marca', v.marca || '—'], ['Modelo', v.modelo || '—'], ['Año', v.anio || '—'],
-        ['Patente', v.patente || '—'], ['Kilometraje', v.km != null ? fmt.num(v.km) + ' km' : '—'],
-        ['Combustible', v.combustible || '—'], ['Caja', v.caja === 'automatica' ? 'Automática' : (v.caja === 'manual' ? 'Manual' : '—')],
-        ['Versión', v.version || '—']
-      ])]),
-      el('div', { class: 'card' }, [el('h4', { text: 'Situación financiera' }), dl([
-        ['Precio de compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
+      el('div', { class: 'card' }, [el('h4', { text: 'Economía' }), dl([
+        ['Compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
         ['Gastos', fmt.money(m.gastosARS)],
         m.comisionARS ? ['Comisiones', fmt.money(m.comisionARS)] : null,
-        ['Lo que puse (total)', fmt.money(m.costoTotalARS), 'strong'],
+        ['Inversión total', fmt.money(m.costoTotalARS), 'strong'],
         ['Precio de venta', m.vendido ? fmt.money(v.sale.precio, v.sale.moneda) : 'Todavía no vendido'],
         m.vendido ? ['Ganancia', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong'] : null,
         m.vendido ? ['Rentabilidad', fmt.pct(m.rentabilidad), m.gananciaARS >= 0 ? 'pos' : 'neg'] : null,
@@ -392,13 +412,53 @@
         m.totalPendienteARS ? ['Pendiente de pago', fmt.money(m.totalPendienteARS), 'neg'] : null,
         m.financiado ? ['Cuotas a cobrar', m.financCobradasCount + ' / ' + m.financCuotasCount + ' cobradas'] : null,
         m.financPorCobrarARS ? ['Falta que te paguen', fmt.money(m.financPorCobrarARS), m.financVencidasARS ? 'neg' : ''] : null
+      ])]),
+      el('div', { class: 'card' }, [el('h4', { text: 'Datos del vehículo' }), dl([
+        ['Marca', v.marca || '—'], ['Modelo', v.modelo || '—'], ['Año', v.anio || '—'],
+        ['Patente', v.patente || '—'], ['Kilometraje', v.km != null ? fmt.num(v.km) + ' km' : '—'],
+        ['Combustible', v.combustible || '—'], ['Caja', v.caja === 'automatica' ? 'Automática' : (v.caja === 'manual' ? 'Manual' : '—')],
+        ['Versión', v.version || '—']
       ])])
     ]));
     if (v.origin && v.origin.type === 'parte-de-pago') {
       out.push(origenCard(v, m));
     }
+    out.push(el('div', { class: 'grid-2' }, [
+      el('div', { class: 'card' }, [el('h4', { text: 'Documentación' }), ui.docBadge(v.documentacion)]),
+      el('div', { class: 'card' }, [
+        el('h4', { text: 'Checklist' }),
+        checklistGlance(v)
+      ])
+    ]));
     if (v.observaciones) out.push(el('div', { class: 'card' }, [el('h4', { text: 'Observaciones' }), el('p', { class: 'obs-text', text: v.observaciones })]));
     return out;
+  }
+
+  // Vista rápida (solo lectura) del checklist — el detalle interactivo
+  // (tildar/destildar) sigue en la pestaña Documentación (tabChecklist).
+  function checklistGlance(v) {
+    var items = App.forms.CHECKLIST_ITEMS;
+    var done = items.filter(function (it) { return v.checklist && v.checklist[it[0]]; }).length;
+    if (!done) return el('p', { class: 'form-help', text: 'Todavía no marcaste nada del checklist.' });
+    return el('div', {}, [
+      el('p', { class: 'form-help', text: done + ' / ' + items.length + ' completado' }),
+      el('div', { class: 'checklist-glance' }, items.map(function (it) {
+        var ok = !!(v.checklist && v.checklist[it[0]]);
+        return el('span', { class: 'checklist-glance-item' + (ok ? ' is-ok' : '') }, [el('span', { text: ok ? '✓' : '○' }), el('span', { text: it[1] })]);
+      }))
+    ]);
+  }
+
+  // "Economía" — junta, tal cual, Compra + Gastos + Venta + Rentabilidad
+  // (mismas funciones que ya existían, sin ningún cálculo nuevo).
+  function tabEconomia(v, m) {
+    return [].concat(tabCompra(v, m), tabGastos(v, m), tabVenta(v, m), tabRentabilidad(v, m));
+  }
+
+  // "Documentación" — junta, tal cual, Documentación + Checklist (mismas
+  // funciones interactivas que ya existían).
+  function tabDocumentacion(v) {
+    return [].concat(tabDocs(v), tabChecklist(v));
   }
 
   function tabCompra(v, m) {
