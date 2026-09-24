@@ -99,6 +99,7 @@ img { max-width: 100%; display: block; }
 .brand-sub { font-size: .72rem; color: var(--c-text-mute); }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-divider { height: 1px; background: var(--c-border); margin: 8px 6px; }
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   padding: 9px 11px; border-radius: var(--radius-sm);

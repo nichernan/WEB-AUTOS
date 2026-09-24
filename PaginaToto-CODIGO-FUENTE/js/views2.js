@@ -374,11 +374,63 @@
     }
   }
 
+  /* ============================== ECONOMÍA ============================ */
+  // Agrupa, en pestañas, las secciones que antes eran páginas propias del
+  // menú (Situación económica = ex "Finanzas", Gastos del negocio, Cuotas
+  // y cobros, Comparación dólar). Cada pestaña reutiliza tal cual la vista
+  // que ya existía (misma función, mismos datos, misma lógica) — acá solo
+  // se decide en qué contenedor se dibuja. "Resúmenes" es una página aparte
+  // (misma info, otra forma de mirarla) a la que se llega con el botón de
+  // arriba a la derecha, sin duplicar ningún cálculo.
+  var economiaTab = 'situacion';
+  function economiaView(root) {
+    var wrap = el('div', { class: 'page' });
+    wrap.appendChild(el('div', { class: 'page-head' }, [
+      el('div', {}, [
+        el('h1', { text: 'Economía' }),
+        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas y comparación del dólar' })
+      ]),
+      el('div', { class: 'page-head-actions' }, [
+        el('a', { class: 'btn btn-ghost', href: '#/resumenes', html: '<span>🧮</span> Resúmenes' })
+      ])
+    ]));
+
+    var TABS = [
+      ['situacion', 'Situación económica', finanzasView],
+      ['gastos', 'Gastos del negocio', gastosNegocioView],
+      ['cuotas', 'Cuotas y cobros', cuotasView],
+      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }]
+    ];
+    var tabsWrap = el('div', { class: 'tabs' });
+    var panel = el('div', { class: 'tab-panel' });
+
+    function renderTab(key) {
+      ui.clear(panel);
+      var t = TABS.filter(function (x) { return x[0] === key; })[0] || TABS[0];
+      t[2](panel);
+    }
+    TABS.forEach(function (t) {
+      var b = el('button', { class: 'tab' + (t[0] === economiaTab ? ' is-active' : ''), text: t[1], onclick: function () {
+        economiaTab = t[0];
+        ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
+        b.classList.add('is-active');
+        renderTab(t[0]);
+      } });
+      tabsWrap.appendChild(b);
+    });
+
+    wrap.appendChild(tabsWrap);
+    wrap.appendChild(panel);
+    renderTab(economiaTab);
+    root.appendChild(wrap);
+  }
+
   /* =============================== FINANZAS =========================== */
+  // ("Situación económica" dentro de Economía — misma lógica y datos de siempre)
   function finanzasView(root) {
     var g = fin.globalMetrics();
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Finanzas', 'Situación económica de cada vehículo y del negocio'));
+    wrap.appendChild(pageHead('Situación económica', 'Situación económica de cada vehículo y del negocio'));
 
     wrap.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
       miniStat('Capital invertido en stock', fmt.money(g.capitalInvertido)),
@@ -1116,6 +1168,16 @@
   function ajustesView(root) {
     var wrap = el('div', { class: 'page' });
     wrap.appendChild(pageHead('Ajustes', 'Configuración general'));
+
+    // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('h3', { text: '🗂️ Datos' }),
+      el('div', { class: 'row-btns' }, [
+        el('a', { class: 'btn btn-ghost', href: '#/papelera', html: '<span>🗑️</span> Papelera' }),
+        el('a', { class: 'btn btn-ghost', href: '#/exportar', html: '<span>📤</span> Exportar' })
+      ])
+    ]));
+
     var s = store.getState().settings;
     var fDolar = ui.input({ inputmode: 'decimal', value: s.dolarActual });
     var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
@@ -1368,7 +1430,7 @@
   App.views = App.views || {};
   Object.assign(App.views, {
     timeline: timeline,
-    alertas: alertasView, finanzas: finanzasView, resumenes: resumenesView,
+    alertas: alertasView, economia: economiaView, finanzas: finanzasView, resumenes: resumenesView,
     historial: historialView, cuotas: cuotasView, gastosNegocio: gastosNegocioView,
     comparacion: comparacionView, contactos: contactosView,
     papelera: papeleraView, exportar: exportarView, ajustes: ajustesView

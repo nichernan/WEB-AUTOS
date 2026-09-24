@@ -5,31 +5,51 @@
   'use strict';
   var ui = App.ui, el = ui.el, store = App.store;
 
+  // Menú lateral simplificado: Gastos del negocio, Cuotas y cobros y
+  // Comparación dólar quedaron agrupados dentro de "Economía" (con
+  // "Resúmenes" accesible desde ahí); Papelera y Exportar quedaron dentro
+  // de "Ajustes". Las rutas siguen existiendo igual, solo dejaron de
+  // aparecer como ítems propios del menú.
   var NAV = [
     { path: '', icon: '🏠', label: 'Inicio' },
-    { path: 'finanzas', icon: '📊', label: 'Finanzas' },
-    { path: 'gastos-negocio', icon: '🏢', label: 'Gastos del negocio' },
-    { path: 'cuotas', icon: '💳', label: 'Cuotas y cobros' },
-    { path: 'resumenes', icon: '🧮', label: 'Resúmenes' },
-    { path: 'comparacion', icon: '💵', label: 'Comparación dólar' },
-    { path: 'historial', icon: '🕓', label: 'Historial' },
+    { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
-    { path: 'exportar', icon: '📤', label: 'Exportar' },
-    { path: 'papelera', icon: '🗑️', label: 'Papelera' },
+    { path: 'historial', icon: '🕓', label: 'Historial' },
     { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
   ];
 
   // Barra inferior para celular (accesos directos más usados)
   var BOTTOM_NAV = [
     { path: '', icon: '🏠', label: 'Inicio' },
-    { path: 'finanzas', icon: '📊', label: 'Finanzas' },
+    { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'cuotas', icon: '💳', label: 'Cuotas' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
     { path: '__menu', icon: '☰', label: 'Menú' }
   ];
 
+  // Rutas que ya no tienen ítem propio en el menú, pero se muestran como
+  // parte de otra sección (para que ese ítem del menú quede marcado activo).
+  var SUBROUTE_OF = {
+    finanzas: 'economia', 'gastos-negocio': 'economia', cuotas: 'economia',
+    resumenes: 'economia', comparacion: 'economia',
+    papelera: 'ajustes', exportar: 'ajustes'
+  };
+
   var appRoot, mainEl, sidebarEl, searchEl;
+
+  function navItems() {
+    var nodes = [];
+    NAV.forEach(function (n) {
+      if (n.path === 'ajustes') nodes.push(el('div', { class: 'nav-divider' }));
+      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
+        el('span', { class: 'nav-icon', text: n.icon }),
+        el('span', { class: 'nav-label', text: n.label }),
+        n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
+      ]));
+    });
+    return nodes;
+  }
 
   function build() {
     appRoot = el('div', { class: 'app-shell' });
@@ -41,13 +61,7 @@
         el('div', { class: 'brand-logo', text: '🚘' }),
         el('div', {}, [el('strong', { text: 'PaginaToto' }), el('span', { class: 'brand-sub', text: 'Gestión de compraventa' })])
       ]),
-      el('nav', { class: 'nav' }, NAV.map(function (n) {
-        return el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
-          el('span', { class: 'nav-icon', text: n.icon }),
-          el('span', { class: 'nav-label', text: n.label }),
-          n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
-        ]);
-      })),
+      el('nav', { class: 'nav' }, navItems()),
       online ? el('div', { class: 'sidebar-user' }, [
         el('span', { class: 'sidebar-user-name', text: (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || '' }),
         el('button', { class: 'btn btn-sm btn-ghost', text: 'Salir', onclick: function () { App.auth.logout(); } })
@@ -113,7 +127,7 @@
       switch (p.name) {
         case '': App.views.dashboard(mainEl); break;
         case 'vehiculo': App.views.vehicleDetail(mainEl, p.param); break;
-        case 'finanzas': App.views.finanzas(mainEl); break;
+        case 'economia': case 'finanzas': App.views.economia(mainEl); break;
         case 'gastos-negocio': App.views.gastosNegocio(mainEl); break;
         case 'cuotas': App.views.cuotas(mainEl); break;
         case 'resumenes': App.views.resumenes(mainEl); break;
@@ -139,6 +153,7 @@
 
     // sync nav active (lateral + barra inferior)
     var activePath = (p.name === 'vehiculo') ? '' : p.name;
+    if (SUBROUTE_OF[activePath]) activePath = SUBROUTE_OF[activePath];
     ui.qsa('.nav-item', sidebarEl).forEach(function (a) {
       a.classList.toggle('is-active', a.dataset.path === activePath);
     });

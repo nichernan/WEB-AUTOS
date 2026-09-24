@@ -109,6 +109,7 @@ img { max-width: 100%; display: block; }
 .brand-sub { font-size: .72rem; color: var(--c-text-mute); }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-divider { height: 1px; background: var(--c-border); margin: 8px 6px; }
 .nav-item {
   display: flex; align-items: center; gap: 11px;
   padding: 9px 11px; border-radius: var(--radius-sm);
@@ -5617,11 +5618,63 @@ details.card[open] > summary { margin-bottom: 10px; }
     }
   }
 
+  /* ============================== ECONOMÍA ============================ */
+  // Agrupa, en pestañas, las secciones que antes eran páginas propias del
+  // menú (Situación económica = ex "Finanzas", Gastos del negocio, Cuotas
+  // y cobros, Comparación dólar). Cada pestaña reutiliza tal cual la vista
+  // que ya existía (misma función, mismos datos, misma lógica) — acá solo
+  // se decide en qué contenedor se dibuja. "Resúmenes" es una página aparte
+  // (misma info, otra forma de mirarla) a la que se llega con el botón de
+  // arriba a la derecha, sin duplicar ningún cálculo.
+  var economiaTab = 'situacion';
+  function economiaView(root) {
+    var wrap = el('div', { class: 'page' });
+    wrap.appendChild(el('div', { class: 'page-head' }, [
+      el('div', {}, [
+        el('h1', { text: 'Economía' }),
+        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas y comparación del dólar' })
+      ]),
+      el('div', { class: 'page-head-actions' }, [
+        el('a', { class: 'btn btn-ghost', href: '#/resumenes', html: '<span>🧮</span> Resúmenes' })
+      ])
+    ]));
+
+    var TABS = [
+      ['situacion', 'Situación económica', finanzasView],
+      ['gastos', 'Gastos del negocio', gastosNegocioView],
+      ['cuotas', 'Cuotas y cobros', cuotasView],
+      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }]
+    ];
+    var tabsWrap = el('div', { class: 'tabs' });
+    var panel = el('div', { class: 'tab-panel' });
+
+    function renderTab(key) {
+      ui.clear(panel);
+      var t = TABS.filter(function (x) { return x[0] === key; })[0] || TABS[0];
+      t[2](panel);
+    }
+    TABS.forEach(function (t) {
+      var b = el('button', { class: 'tab' + (t[0] === economiaTab ? ' is-active' : ''), text: t[1], onclick: function () {
+        economiaTab = t[0];
+        ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
+        b.classList.add('is-active');
+        renderTab(t[0]);
+      } });
+      tabsWrap.appendChild(b);
+    });
+
+    wrap.appendChild(tabsWrap);
+    wrap.appendChild(panel);
+    renderTab(economiaTab);
+    root.appendChild(wrap);
+  }
+
   /* =============================== FINANZAS =========================== */
+  // ("Situación económica" dentro de Economía — misma lógica y datos de siempre)
   function finanzasView(root) {
     var g = fin.globalMetrics();
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Finanzas', 'Situación económica de cada vehículo y del negocio'));
+    wrap.appendChild(pageHead('Situación económica', 'Situación económica de cada vehículo y del negocio'));
 
     wrap.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
       miniStat('Capital invertido en stock', fmt.money(g.capitalInvertido)),
@@ -6359,6 +6412,16 @@ details.card[open] > summary { margin-bottom: 10px; }
   function ajustesView(root) {
     var wrap = el('div', { class: 'page' });
     wrap.appendChild(pageHead('Ajustes', 'Configuración general'));
+
+    // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('h3', { text: '🗂️ Datos' }),
+      el('div', { class: 'row-btns' }, [
+        el('a', { class: 'btn btn-ghost', href: '#/papelera', html: '<span>🗑️</span> Papelera' }),
+        el('a', { class: 'btn btn-ghost', href: '#/exportar', html: '<span>📤</span> Exportar' })
+      ])
+    ]));
+
     var s = store.getState().settings;
     var fDolar = ui.input({ inputmode: 'decimal', value: s.dolarActual });
     var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
@@ -6611,7 +6674,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   App.views = App.views || {};
   Object.assign(App.views, {
     timeline: timeline,
-    alertas: alertasView, finanzas: finanzasView, resumenes: resumenesView,
+    alertas: alertasView, economia: economiaView, finanzas: finanzasView, resumenes: resumenesView,
     historial: historialView, cuotas: cuotasView, gastosNegocio: gastosNegocioView,
     comparacion: comparacionView, contactos: contactosView,
     papelera: papeleraView, exportar: exportarView, ajustes: ajustesView
@@ -6627,31 +6690,51 @@ details.card[open] > summary { margin-bottom: 10px; }
   'use strict';
   var ui = App.ui, el = ui.el, store = App.store;
 
+  // Menú lateral simplificado: Gastos del negocio, Cuotas y cobros y
+  // Comparación dólar quedaron agrupados dentro de "Economía" (con
+  // "Resúmenes" accesible desde ahí); Papelera y Exportar quedaron dentro
+  // de "Ajustes". Las rutas siguen existiendo igual, solo dejaron de
+  // aparecer como ítems propios del menú.
   var NAV = [
     { path: '', icon: '🏠', label: 'Inicio' },
-    { path: 'finanzas', icon: '📊', label: 'Finanzas' },
-    { path: 'gastos-negocio', icon: '🏢', label: 'Gastos del negocio' },
-    { path: 'cuotas', icon: '💳', label: 'Cuotas y cobros' },
-    { path: 'resumenes', icon: '🧮', label: 'Resúmenes' },
-    { path: 'comparacion', icon: '💵', label: 'Comparación dólar' },
-    { path: 'historial', icon: '🕓', label: 'Historial' },
+    { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
-    { path: 'exportar', icon: '📤', label: 'Exportar' },
-    { path: 'papelera', icon: '🗑️', label: 'Papelera' },
+    { path: 'historial', icon: '🕓', label: 'Historial' },
     { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
   ];
 
   // Barra inferior para celular (accesos directos más usados)
   var BOTTOM_NAV = [
     { path: '', icon: '🏠', label: 'Inicio' },
-    { path: 'finanzas', icon: '📊', label: 'Finanzas' },
+    { path: 'economia', icon: '💰', label: 'Economía' },
     { path: 'cuotas', icon: '💳', label: 'Cuotas' },
     { path: 'alertas', icon: '🔔', label: 'Alertas' },
     { path: '__menu', icon: '☰', label: 'Menú' }
   ];
 
+  // Rutas que ya no tienen ítem propio en el menú, pero se muestran como
+  // parte de otra sección (para que ese ítem del menú quede marcado activo).
+  var SUBROUTE_OF = {
+    finanzas: 'economia', 'gastos-negocio': 'economia', cuotas: 'economia',
+    resumenes: 'economia', comparacion: 'economia',
+    papelera: 'ajustes', exportar: 'ajustes'
+  };
+
   var appRoot, mainEl, sidebarEl, searchEl;
+
+  function navItems() {
+    var nodes = [];
+    NAV.forEach(function (n) {
+      if (n.path === 'ajustes') nodes.push(el('div', { class: 'nav-divider' }));
+      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
+        el('span', { class: 'nav-icon', text: n.icon }),
+        el('span', { class: 'nav-label', text: n.label }),
+        n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
+      ]));
+    });
+    return nodes;
+  }
 
   function build() {
     appRoot = el('div', { class: 'app-shell' });
@@ -6663,13 +6746,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         el('div', { class: 'brand-logo', text: '🚘' }),
         el('div', {}, [el('strong', { text: 'PaginaToto' }), el('span', { class: 'brand-sub', text: 'Gestión de compraventa' })])
       ]),
-      el('nav', { class: 'nav' }, NAV.map(function (n) {
-        return el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
-          el('span', { class: 'nav-icon', text: n.icon }),
-          el('span', { class: 'nav-label', text: n.label }),
-          n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
-        ]);
-      })),
+      el('nav', { class: 'nav' }, navItems()),
       online ? el('div', { class: 'sidebar-user' }, [
         el('span', { class: 'sidebar-user-name', text: (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || '' }),
         el('button', { class: 'btn btn-sm btn-ghost', text: 'Salir', onclick: function () { App.auth.logout(); } })
@@ -6735,7 +6812,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       switch (p.name) {
         case '': App.views.dashboard(mainEl); break;
         case 'vehiculo': App.views.vehicleDetail(mainEl, p.param); break;
-        case 'finanzas': App.views.finanzas(mainEl); break;
+        case 'economia': case 'finanzas': App.views.economia(mainEl); break;
         case 'gastos-negocio': App.views.gastosNegocio(mainEl); break;
         case 'cuotas': App.views.cuotas(mainEl); break;
         case 'resumenes': App.views.resumenes(mainEl); break;
@@ -6761,6 +6838,7 @@ details.card[open] > summary { margin-bottom: 10px; }
 
     // sync nav active (lateral + barra inferior)
     var activePath = (p.name === 'vehiculo') ? '' : p.name;
+    if (SUBROUTE_OF[activePath]) activePath = SUBROUTE_OF[activePath];
     ui.qsa('.nav-item', sidebarEl).forEach(function (a) {
       a.classList.toggle('is-active', a.dataset.path === activePath);
     });
