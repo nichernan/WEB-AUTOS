@@ -48,11 +48,13 @@
 
   function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
-  // convierte a entero o null (nunca deja NaN guardado, p.ej. si alguien escribe letras en Año/Km)
+  // convierte a entero o null (nunca deja NaN guardado, p.ej. si alguien escribe letras en
+  // Año/Km; tampoco un negativo, que no tiene sentido para ninguno de los dos campos)
   function toIntOrNull(x) {
     if (x === '' || x == null) return null;
     var n = parseInt(x, 10);
-    return isNaN(n) ? null : n;
+    if (isNaN(n) || n < 0) return null;
+    return n;
   }
 
   /* --------------------------- Persistencia ------------------------------- */
@@ -530,7 +532,7 @@
     // si había un vehículo generado como parte de pago y no fue tocado, se envía a papelera
     if (v.sale.tradeIn && v.sale.tradeIn.vehicleId) {
       var ti = getVehicle(v.sale.tradeIn.vehicleId);
-      if (ti && !ti.sale && (ti.expenses || []).length === 0) {
+      if (ti && !ti.sale && !ti.reservation && (ti.expenses || []).length === 0) {
         ti.deleted = true; ti.deletedAt = Date.now();
       }
     }
@@ -750,7 +752,33 @@
   function getEvent(id) { return state.history.filter(function (h) { return h.id === id; })[0] || null; }
 
   /* ----------------------------- Helpers varios ----------------------- */
-  function num(x) { var n = parseFloat(String(x).replace(/\./g, '').replace(',', '.')); return isNaN(n) ? 0 : n; }
+  // Interpreta números escritos en formato argentino (1.500.000,50) o con
+  // notación "genérica" (1500.50 / 1,500.50) sin que el usuario tenga que
+  // pensar en el formato. Antes se asumía siempre "punto = miles" y un monto
+  // como "1500.50" (muy común al tipear con teclado numérico en inglés)
+  // quedaba guardado como 150050 — un error silencioso de x100 en dinero.
+  function num(x) {
+    var s = String(x == null ? '' : x).trim();
+    if (!s) return 0;
+    var neg = s.charAt(0) === '-';
+    s = s.replace(/[^0-9.,]/g, '');
+    var lastComma = s.lastIndexOf(','), lastDot = s.lastIndexOf('.');
+    if (lastComma > -1 && lastDot > -1) {
+      // están los dos separadores: el que aparece último es el decimal
+      s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+    } else if (lastComma > -1) {
+      var cp = s.split(',');
+      s = (cp.length === 2 && cp[1].length <= 2) ? (cp[0] + '.' + cp[1]) : s.replace(/,/g, '');
+    } else if (lastDot > -1) {
+      var dp = s.split('.');
+      // un solo punto seguido de 3 dígitos es ambiguo entre "miles" (AR) y
+      // decimal; en montos de dinero (máx. 2 decimales) siempre es miles.
+      if (!(dp.length === 2 && dp[1].length <= 2)) s = s.replace(/\./g, '');
+    }
+    var n = parseFloat(s);
+    n = isNaN(n) ? 0 : n;
+    return neg ? -n : n;
+  }
   function vehicleName(v) {
     return [v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || (v.patente || 'Vehículo sin datos');
   }
