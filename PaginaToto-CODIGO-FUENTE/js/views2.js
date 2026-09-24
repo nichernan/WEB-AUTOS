@@ -384,7 +384,7 @@
   // arriba a la derecha, sin duplicar ningún cálculo.
   var economiaTab = 'situacion';
   function economiaView(root) {
-    var wrap = el('div', { class: 'page' });
+    var wrap = el('div', { class: 'page page-economia' });
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
         el('h1', { text: 'Economía' }),
@@ -484,7 +484,7 @@
       ['Más tiempo en stock', g.masTiempoStock, function (x) { return fmt.days(x.m.diasEnStock); }],
       ['Mayor venta', g.mayorVenta, function (x) { return fmt.money(x.m.ventaARS); }]
     ];
-    wrap.appendChild(el('div', { class: 'card' }, [
+    var rendCard = el('div', { class: 'card' }, [
       el('h3', { text: '📈 Rendimiento' }),
       el('div', { class: 'perf-list' }, perfItems.map(function (it) {
         var label = it[0], w = it[1], valFn = it[2];
@@ -496,10 +496,10 @@
           el('span', { class: 'perf-value', text: w && w.v ? valFn(w) : '—' })
         ]);
       }))
-    ]));
+    ]);
 
     // --- Pendientes: cuotas por cobrar/pagar, gastos fijos y diferencia en USD ---
-    wrap.appendChild(el('div', { class: 'card' }, [
+    var pendCard = el('div', { class: 'card' }, [
       el('h3', { text: '💰 Pendientes' }),
       el('div', { class: 'grid-2' }, [
         miniStat('Por cobrar', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
@@ -507,7 +507,12 @@
         miniStat('Gastos del negocio', fmt.money(g.gastosFijosTotales)),
         miniStat('Diferencia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg')
       ])
-    ]));
+    ]);
+
+    // En desktop quedan lado a lado (mismo .grid-2 que ya colapsa a 1
+    // columna en mobile); en la tarjeta de Pendientes se reutiliza esa
+    // misma clase para su propia grilla interna de 4 mini-stats.
+    wrap.appendChild(el('div', { class: 'grid-2' }, [rendCard, pendCard]));
 
     root.appendChild(wrap);
   }
@@ -1019,11 +1024,23 @@
   }
 
   /* ========================== CUOTAS Y COBROS ====================== */
+  // "Cuotas" (lo que pagás) y "Cobros" (lo que te pagan) se muestran de a
+  // una por vez mediante un selector interno, para no mostrar todo junto.
+  // Reutiliza tal cual totals()/block() de siempre — ningún dato ni cálculo
+  // nuevo, solo se decide cuál de los dos bloques se dibuja.
+  var cuotasSubTab = 'pagar';
   function cuotasView(root) {
     var wrap = el('div', { class: 'page' });
     wrap.appendChild(pageHead('Cuotas y cobros', 'Lo que tenés que pagar y lo que te tienen que pagar'));
     var hoy = store.todayISO();
     var inst = fin.allInstallments();
+
+    var seg = el('div', { class: 'seg-control' }, [
+      el('button', { class: 'seg' + (cuotasSubTab === 'pagar' ? ' is-active' : ''), text: 'Cuotas', onclick: function () { cuotasSubTab = 'pagar'; draw(); } }),
+      el('button', { class: 'seg' + (cuotasSubTab === 'cobrar' ? ' is-active' : ''), text: 'Cobros', onclick: function () { cuotasSubTab = 'cobrar'; draw(); } })
+    ]);
+    wrap.appendChild(seg);
+    var content = el('div', {});
 
     function totals(list) {
       var t = { total: 0, hecho: 0, falta: 0, vencido: 0 };
@@ -1067,8 +1084,15 @@
       card.appendChild(el('div', { class: 'table-wrap' }, table));
       return card;
     }
-    wrap.appendChild(block('💸 Cuotas que tenés que pagar', inst.pagar, 'pagar'));
-    wrap.appendChild(block('💰 Cuotas que te tienen que pagar', inst.cobrar, 'cobrar'));
+    function draw() {
+      ui.qsa('.seg', seg).forEach(function (b, i) { b.classList.toggle('is-active', (i === 0 ? 'pagar' : 'cobrar') === cuotasSubTab); });
+      ui.clear(content);
+      content.appendChild(cuotasSubTab === 'pagar'
+        ? block('💸 Cuotas que tenés que pagar', inst.pagar, 'pagar')
+        : block('💰 Cuotas que te tienen que pagar', inst.cobrar, 'cobrar'));
+    }
+    wrap.appendChild(content);
+    draw();
     root.appendChild(wrap);
   }
 

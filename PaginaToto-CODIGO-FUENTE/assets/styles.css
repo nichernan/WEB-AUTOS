@@ -137,6 +137,10 @@ img { max-width: 100%; display: block; }
 
 .main { padding: 22px; flex: 1; }
 .page { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+/* Economía: aprovecha más ancho que el resto de las pantallas (sidebar +
+   margen cómodo + contenido amplio), sin afectar el resto de la app. */
+.page.page-economia { max-width: 1600px; }
+.page-economia .tab-panel .page { max-width: none; margin: 0; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-sub { color: var(--c-text-mute); font-size: .9rem; margin-top: 2px; }
 .page-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
