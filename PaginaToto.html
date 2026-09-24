@@ -208,6 +208,17 @@ img { max-width: 100%; display: block; }
 .info-card { background: var(--c-primary-soft); border-color: transparent; }
 .count-tag { font-size: .78rem; color: var(--c-text-mute); background: var(--c-surface-2); padding: 2px 8px; border-radius: 20px; }
 
+/* Resúmenes: selector de período compacto + tarjetas de acceso */
+.resumen-period { display: flex; align-items: center; gap: 8px; }
+.resumen-period-ico { font-size: 1rem; line-height: 1; flex-shrink: 0; }
+.resumen-period select { max-width: 200px; }
+.resumen-nav-card { flex-direction: row; align-items: center; gap: 14px; cursor: pointer; transition: border-color .12s, background .12s; }
+.resumen-nav-card:hover { border-color: var(--c-primary); background: var(--c-surface-2); }
+.resumen-nav-ico { font-size: 1.6rem; flex-shrink: 0; line-height: 1; }
+.resumen-nav-body { display: flex; flex-direction: column; gap: 2px; }
+.resumen-nav-body strong { font-size: .96rem; }
+.resumen-nav-body span { font-size: .82rem; color: var(--c-text-mute); }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 
@@ -664,6 +675,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   .page-head-actions .btn { flex: 1; }
   /* En celular, Alertas ya está siempre visible en la barra inferior */
   .page-head-actions .btn-alertas { display: none; }
+  .resumen-period select { max-width: none; }
   .check-grid { grid-template-columns: 1fr; }
   .modal-overlay { padding: 0; }
   .modal {
@@ -6110,16 +6122,23 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   /* ============================== RESÚMENES ========================== */
-  var resumenState = { preset: 'mes', from: '', to: '', cmpA: '', cmpB: '' };
+  // Pantalla principal: resumen compacto (4 métricas + accesos). El detalle
+  // que antes se mostraba todo junto (comparador, tablas mensuales/anuales,
+  // estadísticas del negocio) pasó a la sub-pantalla "negocio"; el detalle
+  // por vehículo es nuevo (reutiliza fin.vehicleMetrics, sin cálculos nuevos).
+  // Todo sigue usando fin.periodResult/fin.monthlySeries/fin.globalMetrics
+  // tal cual ya existían — solo cambió cómo se organiza la presentación.
+  var resumenState = { preset: 'mes', from: '', to: '', cmpA: '', cmpB: '', screen: 'home' };
   function resumenesView(root) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Resúmenes financieros', 'Ingresos, egresos y resultado neto por período'));
+    var head = pageHead('Resúmenes');
 
     var presets = [['hoy', 'Hoy'], ['semana', 'Esta semana'], ['mes', 'Este mes'], ['anio', 'Este año'], ['historico', 'Histórico'], ['rango', 'Rango personalizado']];
-    var tabs = el('div', { class: 'seg-control' }, presets.map(function (p) {
-      return el('button', { class: 'seg' + (resumenState.preset === p[0] ? ' is-active' : ''), text: p[1], onclick: function () { resumenState.preset = p[0]; render(); } });
-    }));
-    wrap.appendChild(tabs);
+    var selPeriodo = ui.select(presets.map(function (p) { return { value: p[0], label: p[1] }; }), resumenState.preset, { class: 'input select' });
+    selPeriodo.addEventListener('change', function () { resumenState.preset = selPeriodo.value; render(); });
+    var periodoWrap = el('div', { class: 'resumen-period' }, [el('span', { class: 'resumen-period-ico', text: '📅' }), selPeriodo]);
+    head.appendChild(periodoWrap);
+    wrap.appendChild(head);
 
     var rangeBox = el('div', { class: 'range-box' });
     var fFrom = ui.input({ type: 'date', value: resumenState.from });
@@ -6145,35 +6164,96 @@ details.card[open] > summary { margin-bottom: 10px; }
       return fin.allRange();
     }
 
+    function goScreen(s) { resumenState.screen = s; render(); }
+    function volverLink() {
+      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Resúmenes', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
+    }
+    function navCard(icon, title, desc, screen) {
+      return el('div', { class: 'card resumen-nav-card', onclick: function () { goScreen(screen); } }, [
+        el('span', { class: 'resumen-nav-ico', text: icon }),
+        el('div', { class: 'resumen-nav-body' }, [el('strong', { text: title }), el('span', { text: desc })])
+      ]);
+    }
+
     function render() {
-      ui.qsa('.seg', tabs).forEach(function (b, i) { b.classList.toggle('is-active', presets[i][0] === resumenState.preset); });
-      rangeBox.hidden = resumenState.preset !== 'rango';
+      var screen = resumenState.screen;
+      periodoWrap.hidden = screen === 'vehiculos';
+      rangeBox.hidden = screen === 'vehiculos' || resumenState.preset !== 'rango';
       ui.clear(content);
+
+      if (screen === 'vehiculos') {
+        content.appendChild(volverLink());
+        content.appendChild(el('h3', { text: 'Estadísticas por vehículo', style: 'margin-top:10px' }));
+        content.appendChild(vehiculosStatsCard());
+        return;
+      }
+
+      if (screen === 'negocio') {
+        var r2 = fin.periodResult(currentRange());
+        content.appendChild(volverLink());
+        content.appendChild(el('h3', { text: 'Estadísticas del negocio', style: 'margin-top:10px' }));
+        content.appendChild(el('div', { class: 'card' }, dl([
+          ['Período', (r2.range.from ? fmt.date(r2.range.from) : 'inicio') + '  —  ' + (r2.range.to ? fmt.date(r2.range.to) : 'hoy')],
+          ['Compras registradas', r2.comprasCount],
+          ['Ventas registradas', r2.ventasCount],
+          ['Cuotas pagadas en el período', fmt.money(r2.cuotasPagadas)],
+          ['(+) Ganancias por autos vendidos', fmt.money(r2.ganancias), r2.ganancias >= 0 ? 'pos' : 'neg'],
+          ['(−) Gastos puestos en autos', fmt.money(r2.gastos)],
+          ['(−) Gastos fijos del negocio', fmt.money(r2.gastosFijos)],
+          ['(=) Resultado neto', fmt.money(r2.resultadoNeto), r2.resultadoNeto >= 0 ? 'pos strong' : 'neg strong']
+        ])));
+        content.appendChild(comparador());
+        content.appendChild(tablaMensual());
+        content.appendChild(tablaAnual());
+        estadisticasContent().forEach(function (n) { content.appendChild(n); });
+        return;
+      }
+
+      // screen === 'home': resumen compacto
       var r = fin.periodResult(currentRange());
       content.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
-        miniStat('Ganancias por autos', fmt.money(r.ganancias), r.ganancias >= 0 ? 'pos' : 'neg'),
-        miniStat('Gastos de autos', fmt.money(r.gastos)),
-        miniStat('Gastos del negocio', fmt.money(r.gastosFijos)),
-        miniStat('Resultado neto', fmt.money(r.resultadoNeto), r.resultadoNeto >= 0 ? 'pos' : 'neg')
+        miniStat('Ventas', fmt.num(r.ventasCount)),
+        miniStat('Ganancia', fmt.money(r.ganancias), r.ganancias >= 0 ? 'pos' : 'neg'),
+        miniStat('Gastos', fmt.money(r.gastos)),
+        miniStat('Resultado', fmt.money(r.resultadoNeto), r.resultadoNeto >= 0 ? 'pos' : 'neg')
       ]));
-      content.appendChild(el('div', { class: 'card' }, dl([
-        ['Período', (r.range.from ? fmt.date(r.range.from) : 'inicio') + '  —  ' + (r.range.to ? fmt.date(r.range.to) : 'hoy')],
-        ['Compras registradas', r.comprasCount],
-        ['Ventas registradas', r.ventasCount],
-        ['Cuotas pagadas en el período', fmt.money(r.cuotasPagadas)],
-        ['(+) Ganancias por autos vendidos', fmt.money(r.ganancias), r.ganancias >= 0 ? 'pos' : 'neg'],
-        ['(−) Gastos puestos en autos', fmt.money(r.gastos)],
-        ['(−) Gastos fijos del negocio', fmt.money(r.gastosFijos)],
-        ['(=) Resultado neto', fmt.money(r.resultadoNeto), r.resultadoNeto >= 0 ? 'pos strong' : 'neg strong']
-      ])));
 
-      // comparaciones
-      content.appendChild(comparador());
-      // resumen mensual del año y anual
-      content.appendChild(tablaMensual());
-      content.appendChild(tablaAnual());
-      // estadísticas del negocio (indicadores clave)
-      estadisticasContent().forEach(function (n) { content.appendChild(n); });
+      content.appendChild(el('h3', { text: 'Resumen del negocio', style: 'margin-top:6px' }));
+      content.appendChild(navCard('📊', 'Ver estadísticas del negocio', 'Ver rendimiento, ventas, tiempos, resultados y otros indicadores del negocio.', 'negocio'));
+      content.appendChild(navCard('🚗', 'Ver estadísticas por vehículo', 'Ver el detalle y rendimiento de cada vehículo.', 'vehiculos'));
+
+      var evts = store.getHistory().slice(0, 6);
+      if (evts.length) {
+        content.appendChild(el('div', { class: 'card-actions-head', style: 'margin-top:6px' }, [
+          el('h3', { text: 'Actividad reciente' }),
+          el('a', { class: 'mini-tag', href: '#/historial', text: 'Ver todo →' })
+        ]));
+        content.appendChild(el('div', { class: 'card' }, App.views.timeline(evts)));
+      }
+    }
+
+    function vehiculosStatsCard() {
+      var card = el('div', { class: 'card' });
+      var list = store.activeVehicles();
+      if (!list.length) { card.appendChild(ui.emptyState('No hay vehículos cargados todavía.', '🚗')); return card; }
+      var table = el('table', { class: 'data-table' });
+      table.appendChild(el('thead', {}, el('tr', {}, ['Vehículo', 'Estado', 'Inversión', 'Venta', 'Ganancia', 'Rentabilidad', 'Días en stock'].map(function (h) { return el('th', { text: h }); }))));
+      var tb = el('tbody');
+      list.slice().sort(function (a, b) { return b.createdAt - a.createdAt; }).forEach(function (v) {
+        var m = fin.vehicleMetrics(v);
+        tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
+          el('td', {}, el('span', { class: 'cell-name', text: store.vehicleName(v) })),
+          el('td', {}, ui.estadoBadge(v.estado)),
+          el('td', { text: fmt.money(m.costoTotalARS) }),
+          el('td', { text: m.vendido ? fmt.money(m.ventaARS) : '—' }),
+          el('td', { class: m.vendido ? (m.gananciaARS >= 0 ? 'pos' : 'neg') : '', text: m.vendido ? ((m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS)) : '—' }),
+          el('td', { class: m.vendido ? (m.gananciaARS >= 0 ? 'pos' : 'neg') : '', text: m.vendido ? fmt.pct(m.rentabilidad) : '—' }),
+          el('td', { text: fmt.days(m.diasEnStock) })
+        ]));
+      });
+      table.appendChild(tb);
+      card.appendChild(el('div', { class: 'table-wrap' }, table));
+      return card;
     }
 
     function comparador() {

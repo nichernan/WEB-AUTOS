@@ -198,6 +198,17 @@ img { max-width: 100%; display: block; }
 .info-card { background: var(--c-primary-soft); border-color: transparent; }
 .count-tag { font-size: .78rem; color: var(--c-text-mute); background: var(--c-surface-2); padding: 2px 8px; border-radius: 20px; }
 
+/* Resúmenes: selector de período compacto + tarjetas de acceso */
+.resumen-period { display: flex; align-items: center; gap: 8px; }
+.resumen-period-ico { font-size: 1rem; line-height: 1; flex-shrink: 0; }
+.resumen-period select { max-width: 200px; }
+.resumen-nav-card { flex-direction: row; align-items: center; gap: 14px; cursor: pointer; transition: border-color .12s, background .12s; }
+.resumen-nav-card:hover { border-color: var(--c-primary); background: var(--c-surface-2); }
+.resumen-nav-ico { font-size: 1.6rem; flex-shrink: 0; line-height: 1; }
+.resumen-nav-body { display: flex; flex-direction: column; gap: 2px; }
+.resumen-nav-body strong { font-size: .96rem; }
+.resumen-nav-body span { font-size: .82rem; color: var(--c-text-mute); }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 
@@ -654,6 +665,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   .page-head-actions .btn { flex: 1; }
   /* En celular, Alertas ya está siempre visible en la barra inferior */
   .page-head-actions .btn-alertas { display: none; }
+  .resumen-period select { max-width: none; }
   .check-grid { grid-template-columns: 1fr; }
   .modal-overlay { padding: 0; }
   .modal {
