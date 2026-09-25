@@ -7610,13 +7610,18 @@ details.card[open] > summary { margin-bottom: 10px; }
     }
 
     // sync nav active (lateral + barra inferior)
-    var activePath = (p.name === 'vehiculo') ? '' : p.name;
-    if (SUBROUTE_OF.hasOwnProperty(activePath)) activePath = SUBROUTE_OF[activePath];
+    var rawPath = (p.name === 'vehiculo') ? '' : p.name;
+    var activePath = SUBROUTE_OF.hasOwnProperty(rawPath) ? SUBROUTE_OF[rawPath] : rawPath;
     ui.qsa('.nav-item', sidebarEl).forEach(function (a) {
       a.classList.toggle('is-active', a.dataset.path === activePath);
     });
+    // La barra inferior tiene ítem propio para algunas subrutas (p.ej. "cuotas")
+    // que en el menú lateral quedan agrupadas dentro de "Economía": si existe
+    // ese ítem propio, se marca él; si no, se usa el mismo resultado que el
+    // menú lateral (p.ej. "comparacion" sigue marcando "Economía").
+    var bottomActive = BOTTOM_NAV.some(function (n) { return n.path === rawPath; }) ? rawPath : activePath;
     ui.qsa('.bottomnav-item[data-path]', appRoot).forEach(function (a) {
-      a.classList.toggle('is-active', a.dataset.path === activePath);
+      a.classList.toggle('is-active', a.dataset.path === bottomActive);
     });
     if (searchEl && document.activeElement !== searchEl) searchEl.value = App.filters.q || '';
     document.body.classList.remove('sidebar-open');
