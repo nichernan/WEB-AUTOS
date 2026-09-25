@@ -1003,11 +1003,15 @@
         var total = c.ops.reduce(function (s, o) { return s + o.monto; }, 0);
         card.appendChild(el('details', { class: 'contact-item' }, [
           el('summary', {}, [
-            el('strong', { text: c.nombre }),
-            c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
-            phoneActions(c.telefono),
-            el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
-            el('span', { class: 'muted', text: fmt.money(total) })
+            el('div', { class: 'contact-id' }, [
+              el('strong', { text: c.nombre }),
+              c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
+              phoneActions(c.telefono)
+            ]),
+            el('div', { class: 'contact-meta' }, [
+              el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
+              el('span', { class: 'muted', text: fmt.money(total) })
+            ])
           ]),
           el('div', { class: 'contact-ops' }, c.ops.map(function (o) {
             return el('a', { class: 'contact-op', href: '#/vehiculo/' + o.v.id }, [
@@ -1651,6 +1655,13 @@
   }
   function dl(pairs) { return App.views._dl(pairs); }
 
+  // Al tocar de nuevo el botón de navegación de una sección que tiene su
+  // propia "pantalla interna" (Economía, Cuotas, Ajustes), estas funciones
+  // la resetean al inicio — las llama app.js antes de renderizar.
+  function resetEconomia() { economiaScreen = 'home'; }
+  function resetCuotas() { cuotasSubTab = 'pagar'; }
+  function resetAjustes() { ajustesScreen = 'home'; }
+
   window.App = window.App || {};
   App.views = App.views || {};
   Object.assign(App.views, {
@@ -1658,6 +1669,7 @@
     alertas: alertasView, economia: economiaView, finanzas: finanzasView, resumenes: resumenesView,
     historial: historialView, cuotas: cuotasView, gastosNegocio: gastosNegocioView,
     comparacion: comparacionView, contactos: contactosView,
-    papelera: papeleraView, exportar: exportarView, ajustes: ajustesView
+    papelera: papeleraView, exportar: exportarView, ajustes: ajustesView,
+    resetEconomia: resetEconomia, resetCuotas: resetCuotas, resetAjustes: resetAjustes
   });
 })();

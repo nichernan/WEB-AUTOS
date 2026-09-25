@@ -39,11 +39,34 @@
 
   var appRoot, mainEl, sidebarEl, searchEl;
 
+  // Tocar de nuevo el botón de una sección (sidebar o barra inferior) debe
+  // llevar al inicio de esa sección, aunque esté mostrando un submódulo
+  // interno (Economía, Cuotas, Ajustes) o un modal (Alertas) que no cambian
+  // el hash. Las pantallas con "estado interno" exponen su propio reset
+  // (App.views.resetEconomia/resetCuotas/resetAjustes); acá solo se decide
+  // CUÁNDO llamarlo y, si el hash no va a cambiar (ya estamos en esa
+  // sección), se fuerza un re-render manual porque el navegador no dispara
+  // "hashchange" cuando el hash no cambia.
+  var SECTION_RESET = {
+    economia: function () { App.views.resetEconomia && App.views.resetEconomia(); },
+    cuotas: function () { App.views.resetCuotas && App.views.resetCuotas(); },
+    ajustes: function () { App.views.resetAjustes && App.views.resetAjustes(); },
+    alertas: function () { App.ui.closeAllModals && App.ui.closeAllModals(); }
+  };
+  function handleNavClick(e, path) {
+    if (SECTION_RESET[path]) SECTION_RESET[path]();
+    var target = '#/' + path;
+    if (location.hash === target) {
+      e.preventDefault();
+      App.router.render();
+    }
+  }
+
   function navItems() {
     var nodes = [];
     NAV.forEach(function (n) {
       if (n.path === 'ajustes') nodes.push(el('div', { class: 'nav-divider' }));
-      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
+      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, [
         el('span', { class: 'nav-icon', text: n.icon }),
         el('span', { class: 'nav-label', text: n.label }),
         n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
@@ -98,7 +121,7 @@
       if (n.path === '__menu') {
         return el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }, kids);
       }
-      return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path } }, kids);
+      return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, kids);
     }));
 
     appRoot.appendChild(sidebarEl);

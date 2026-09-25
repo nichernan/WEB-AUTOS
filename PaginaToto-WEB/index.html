@@ -635,10 +635,11 @@ body.modal-open { overflow: hidden; }
 
 /* ========================= Contact / trash =============== */
 .contact-item { border-bottom: 1px solid var(--c-border); padding: 8px 0; }
-.contact-item summary { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
+.contact-item summary { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
 .contact-item summary::-webkit-details-marker { display: none; }
 .contact-item summary strong { min-width: 0; overflow-wrap: break-word; }
-.contact-item .count-tag { margin-left: auto; flex-shrink: 0; }
+.contact-id { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; flex: 1 1 180px; }
+.contact-meta { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
 .phone-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
 .phone-action { width: 28px; height: 28px; font-size: .85rem; text-decoration: none; }
 .contact-ops { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 4px 12px; min-width: 0; }
@@ -2633,6 +2634,12 @@ details.card[open] > summary { margin-bottom: 10px; }
     return api;
   }
 
+  // Cierra cualquier modal abierto (p.ej. al volver a tocar el botón de
+  // navegación de la sección activa, para no dejar un modal "atrapado").
+  function closeAllModals() {
+    modalStack.slice().forEach(function (m) { m.close(); });
+  }
+
   function confirm(opts) {
     return new Promise(function (resolve) {
       var m = modal({
@@ -2763,7 +2770,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   window.App = window.App || {};
   App.ui = {
     el: el, clear: clear, qs: qs, qsa: qsa, appendChildren: appendChildren,
-    toast: toast, modal: modal, confirm: confirm,
+    toast: toast, modal: modal, confirm: confirm, closeAllModals: closeAllModals,
     field: field, input: input, textarea: textarea, select: select, money2: money2,
     moneyInput: moneyInput,
     carIcon: carIcon,
@@ -6874,11 +6881,15 @@ details.card[open] > summary { margin-bottom: 10px; }
         var total = c.ops.reduce(function (s, o) { return s + o.monto; }, 0);
         card.appendChild(el('details', { class: 'contact-item' }, [
           el('summary', {}, [
-            el('strong', { text: c.nombre }),
-            c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
-            phoneActions(c.telefono),
-            el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
-            el('span', { class: 'muted', text: fmt.money(total) })
+            el('div', { class: 'contact-id' }, [
+              el('strong', { text: c.nombre }),
+              c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
+              phoneActions(c.telefono)
+            ]),
+            el('div', { class: 'contact-meta' }, [
+              el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
+              el('span', { class: 'muted', text: fmt.money(total) })
+            ])
           ]),
           el('div', { class: 'contact-ops' }, c.ops.map(function (o) {
             return el('a', { class: 'contact-op', href: '#/vehiculo/' + o.v.id }, [
@@ -7522,6 +7533,13 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
   function dl(pairs) { return App.views._dl(pairs); }
 
+  // Al tocar de nuevo el botón de navegación de una sección que tiene su
+  // propia "pantalla interna" (Economía, Cuotas, Ajustes), estas funciones
+  // la resetean al inicio — las llama app.js antes de renderizar.
+  function resetEconomia() { economiaScreen = 'home'; }
+  function resetCuotas() { cuotasSubTab = 'pagar'; }
+  function resetAjustes() { ajustesScreen = 'home'; }
+
   window.App = window.App || {};
   App.views = App.views || {};
   Object.assign(App.views, {
@@ -7529,7 +7547,8 @@ details.card[open] > summary { margin-bottom: 10px; }
     alertas: alertasView, economia: economiaView, finanzas: finanzasView, resumenes: resumenesView,
     historial: historialView, cuotas: cuotasView, gastosNegocio: gastosNegocioView,
     comparacion: comparacionView, contactos: contactosView,
-    papelera: papeleraView, exportar: exportarView, ajustes: ajustesView
+    papelera: papeleraView, exportar: exportarView, ajustes: ajustesView,
+    resetEconomia: resetEconomia, resetCuotas: resetCuotas, resetAjustes: resetAjustes
   });
 })();
 </script>
@@ -7576,11 +7595,34 @@ details.card[open] > summary { margin-bottom: 10px; }
 
   var appRoot, mainEl, sidebarEl, searchEl;
 
+  // Tocar de nuevo el botón de una sección (sidebar o barra inferior) debe
+  // llevar al inicio de esa sección, aunque esté mostrando un submódulo
+  // interno (Economía, Cuotas, Ajustes) o un modal (Alertas) que no cambian
+  // el hash. Las pantallas con "estado interno" exponen su propio reset
+  // (App.views.resetEconomia/resetCuotas/resetAjustes); acá solo se decide
+  // CUÁNDO llamarlo y, si el hash no va a cambiar (ya estamos en esa
+  // sección), se fuerza un re-render manual porque el navegador no dispara
+  // "hashchange" cuando el hash no cambia.
+  var SECTION_RESET = {
+    economia: function () { App.views.resetEconomia && App.views.resetEconomia(); },
+    cuotas: function () { App.views.resetCuotas && App.views.resetCuotas(); },
+    ajustes: function () { App.views.resetAjustes && App.views.resetAjustes(); },
+    alertas: function () { App.ui.closeAllModals && App.ui.closeAllModals(); }
+  };
+  function handleNavClick(e, path) {
+    if (SECTION_RESET[path]) SECTION_RESET[path]();
+    var target = '#/' + path;
+    if (location.hash === target) {
+      e.preventDefault();
+      App.router.render();
+    }
+  }
+
   function navItems() {
     var nodes = [];
     NAV.forEach(function (n) {
       if (n.path === 'ajustes') nodes.push(el('div', { class: 'nav-divider' }));
-      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path } }, [
+      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, [
         el('span', { class: 'nav-icon', text: n.icon }),
         el('span', { class: 'nav-label', text: n.label }),
         n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
@@ -7635,7 +7677,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       if (n.path === '__menu') {
         return el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }, kids);
       }
-      return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path } }, kids);
+      return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, kids);
     }));
 
     appRoot.appendChild(sidebarEl);

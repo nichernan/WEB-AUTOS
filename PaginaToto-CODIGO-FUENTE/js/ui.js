@@ -163,6 +163,12 @@
     return api;
   }
 
+  // Cierra cualquier modal abierto (p.ej. al volver a tocar el botón de
+  // navegación de la sección activa, para no dejar un modal "atrapado").
+  function closeAllModals() {
+    modalStack.slice().forEach(function (m) { m.close(); });
+  }
+
   function confirm(opts) {
     return new Promise(function (resolve) {
       var m = modal({
@@ -293,7 +299,7 @@
   window.App = window.App || {};
   App.ui = {
     el: el, clear: clear, qs: qs, qsa: qsa, appendChildren: appendChildren,
-    toast: toast, modal: modal, confirm: confirm,
+    toast: toast, modal: modal, confirm: confirm, closeAllModals: closeAllModals,
     field: field, input: input, textarea: textarea, select: select, money2: money2,
     moneyInput: moneyInput,
     carIcon: carIcon,

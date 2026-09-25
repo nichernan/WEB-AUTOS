@@ -619,10 +619,11 @@ body.modal-open { overflow: hidden; }
 
 /* ========================= Contact / trash =============== */
 .contact-item { border-bottom: 1px solid var(--c-border); padding: 8px 0; }
-.contact-item summary { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
+.contact-item summary { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
 .contact-item summary::-webkit-details-marker { display: none; }
 .contact-item summary strong { min-width: 0; overflow-wrap: break-word; }
-.contact-item .count-tag { margin-left: auto; flex-shrink: 0; }
+.contact-id { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; flex: 1 1 180px; }
+.contact-meta { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
 .phone-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
 .phone-action { width: 28px; height: 28px; font-size: .85rem; text-decoration: none; }
 .contact-ops { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 4px 12px; min-width: 0; }
