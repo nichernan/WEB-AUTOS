@@ -828,7 +828,7 @@
     var isEdit = !!reminder;
     var r = reminder || {};
 
-    var fTitulo = ui.input({ value: r.titulo || '', required: true, placeholder: 'Ej: Llamar al gestor por la transferencia' });
+    var fTitulo = ui.input({ value: r.titulo || '', required: true, placeholder: 'Escribí acá...' });
     var fFecha = ui.input({ type: 'date', value: r.fecha || presetDate || store.todayISO() });
     var fHora = ui.input({ type: 'time', value: r.hora || '' });
     var fTipo = ui.select(REM_TIPOS.map(function (t) { return opt(t[0], t[1]); }), r.tipo || 'tarea');
@@ -851,8 +851,8 @@
     } });
 
     var body = el('div', { class: 'form-grid' }, [
-      ui.field('Título *', fTitulo),
-      ui.field('Fecha *', fFecha),
+      ui.field('¿Qué tenés que recordar?', fTitulo),
+      ui.field('¿Cuándo?', fFecha),
       toggleExtra,
       extra
     ]);
@@ -860,14 +860,14 @@
     var footer = [
       isEdit ? el('button', { class: 'btn btn-danger-ghost', text: 'Eliminar', onclick: function () {
         m.close();
-        ui.confirm({ title: 'Eliminar recordatorio', message: '¿Eliminar "' + (r.titulo || 'este recordatorio') + '"?', danger: true, confirmText: 'Eliminar' })
-          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Recordatorio eliminado'); } });
+        ui.confirm({ title: 'Eliminar alerta', message: '¿Eliminar "' + (r.titulo || 'esta alerta') + '"?', danger: true, confirmText: 'Eliminar' })
+          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Alerta eliminada'); } });
       } }) : null,
       el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { m.close(); } }),
-      el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar' : 'Crear recordatorio', onclick: submit })
+      el('button', { class: 'btn btn-primary', html: isEdit ? 'Guardar' : '<span>🔔</span> Crear alerta', onclick: submit })
     ];
 
-    var m = ui.modal({ title: isEdit ? 'Editar recordatorio' : 'Nuevo recordatorio', body: body, footer: footer });
+    var m = ui.modal({ title: isEdit ? 'Editar alerta' : 'Nueva alerta', body: body, footer: footer });
 
     var submitted = false;
     function submit() {
@@ -876,8 +876,8 @@
       if (!fFecha.value) { ui.toast('La fecha es obligatoria', 'error'); return; }
       submitted = true;
       var data = { titulo: fTitulo.value, fecha: fFecha.value, hora: fHora.value, tipo: fTipo.value, nota: fNota.value, repeat: fRepeat.value };
-      if (isEdit) { store.updateReminder(r.id, data); ui.toast('Recordatorio actualizado', 'success'); }
-      else { store.addReminder(data); ui.toast('Recordatorio creado', 'success'); }
+      if (isEdit) { store.updateReminder(r.id, data); ui.toast('Alerta actualizada', 'success'); }
+      else { store.addReminder(data); ui.toast('Alerta creada', 'success'); }
       m.close();
     }
     return m;

@@ -163,13 +163,8 @@
   }
   App.alerts = alerts;
 
-  var remCal = { y: null, m: null, sel: null };
-
   function alertasView(root) {
     var hoy = store.todayISO();
-    var now = new Date();
-    if (remCal.y == null) { remCal.y = now.getFullYear(); remCal.m = now.getMonth(); }
-    if (!remCal.sel) remCal.sel = hoy;
 
     var vehAlerts = alerts.all();
     var b = allBuckets(hoy);
@@ -179,43 +174,31 @@
 
     var wrap = el('div', { class: 'page alertas-page' });
 
-    var head = pageHead('Alertas', 'Qué tenés pendiente, vencido y para hoy');
-    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nueva alerta', onclick: function () { App.forms.reminderForm(null, remCal.sel); } }));
+    var head = pageHead('🔔 Alertas');
+    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nueva alerta', onclick: function () { App.forms.reminderForm(null, hoy); } }));
     wrap.appendChild(head);
 
-    // Resumen (chips)
-    wrap.appendChild(el('div', { class: 'alert-summary' }, [
-      chip('🔔', pendCount, pendCount === 1 ? 'cosa pendiente' : 'cosas pendientes', 'chip-info'),
-      b.overdue.length ? chip('⚠️', b.overdue.length, b.overdue.length === 1 ? 'vencida' : 'vencidas', 'chip-danger') : null,
-      b.today.length ? chip('📅', b.today.length, 'para hoy', 'chip-warn') : null,
-      vehAlerts.length ? chip('🚗', vehAlerts.length, vehAlerts.length === 1 ? 'aviso de vehículos' : 'avisos de vehículos', 'chip-neutral') : null
-    ]));
-
-    if (b.overdue.length) wrap.appendChild(remGroup('Vencidos', b.overdue, hoy, 'overdue'));
-    if (b.today.length) wrap.appendChild(remGroup('Hoy', b.today, hoy, 'today'));
-    if (b.upcoming.length) wrap.appendChild(remGroup('Próximos', b.upcoming.slice(0, 40), hoy, 'upcoming'));
+    if (b.overdue.length) wrap.appendChild(remGroup('🔴 Vencidas', b.overdue, hoy, 'overdue'));
+    if (b.today.length) wrap.appendChild(remGroup('🟡 Hoy', b.today, hoy, 'today'));
+    if (b.upcoming.length) wrap.appendChild(remGroup('🟢 Próximas', b.upcoming.slice(0, 40), hoy, 'upcoming'));
     if (!pendCount) {
       wrap.appendChild(el('div', { class: 'card' }, [ui.emptyState('No tenés nada pendiente. Todo al día 👌', '✅')]));
     }
     if (doneRems.length) {
       wrap.appendChild(el('details', { class: 'card rem-done-box' }, [
-        el('summary', {}, [el('strong', { text: 'Recordatorios completados' }), el('span', { class: 'count-tag', text: doneRems.length })]),
+        el('summary', {}, [el('strong', { text: 'Completadas' }), el('span', { class: 'count-tag', text: doneRems.length })]),
         remList(doneRems, hoy)
       ]));
     }
 
-    // Calendario
-    wrap.appendChild(calendarCard(hoy));
-
-    // Revisión de vehículos
+    // Avisos de vehículos (documentación, días en stock, etc.): misma lógica
+    // de siempre, pero colapsados por defecto para no saturar la pantalla.
     if (vehAlerts.length) {
-      var vsec = el('div', { class: 'card' });
-      vsec.appendChild(el('div', { class: 'card-head' }, [el('h3', { text: 'Revisión de vehículos' }), el('span', { class: 'count-tag', text: vehAlerts.length })]));
       var byVeh = {};
       vehAlerts.forEach(function (a) { (byVeh[a.vehicle.id] = byVeh[a.vehicle.id] || []).push(a); });
-      Object.keys(byVeh).forEach(function (vid) {
+      var vsec = el('div', { class: 'rem-list' }, Object.keys(byVeh).map(function (vid) {
         var v = store.getVehicle(vid);
-        vsec.appendChild(el('a', { class: 'veh-alert', href: '#/vehiculo/' + vid }, [
+        return el('a', { class: 'veh-alert', href: '#/vehiculo/' + vid }, [
           el('div', { class: 'veh-alert-top' }, [
             el('strong', { text: store.vehicleName(v) }),
             v.patente ? el('span', { class: 'row-patente', text: v.patente }) : null
@@ -223,25 +206,20 @@
           el('div', { class: 'veh-alert-lines' }, byVeh[vid].map(function (a) {
             return el('span', { class: 'alrt alrt-' + a.level }, [el('span', { text: a.icon }), el('span', { text: a.text })]);
           }))
-        ]));
-      });
-      wrap.appendChild(vsec);
+        ]);
+      }));
+      wrap.appendChild(el('details', { class: 'card rem-done-box' }, [
+        el('summary', {}, [el('strong', { text: 'Avisos de vehículos' }), el('span', { class: 'count-tag', text: vehAlerts.length })]),
+        vsec
+      ]));
     }
 
     root.appendChild(wrap);
   }
 
-  function chip(icon, n, label, cls) {
-    return el('div', { class: 'summary-chip ' + (cls || '') }, [
-      el('span', { class: 'summary-chip-ico', text: icon }),
-      el('span', { class: 'summary-chip-n', text: n }),
-      el('span', { class: 'summary-chip-lbl', text: label })
-    ]);
-  }
-
   function remGroup(title, items, hoy, kind) {
     return el('div', { class: 'card rem-group rem-group-' + kind }, [
-      el('div', { class: 'rem-group-head' }, [el('h3', { text: title }), el('span', { class: 'count-tag', text: items.length })]),
+      el('div', { class: 'rem-group-head' }, [el('h3', { text: title })]),
       remList(items, hoy)
     ]);
   }
@@ -273,8 +251,8 @@
       class: 'icon-btn rem-del', title: 'Eliminar', html: '&times;',
       onclick: function (e) {
         e.preventDefault(); e.stopPropagation();
-        ui.confirm({ title: 'Eliminar recordatorio', message: '¿Eliminar "' + r.titulo + '"?', danger: true, confirmText: 'Eliminar' })
-          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Recordatorio eliminado'); } });
+        ui.confirm({ title: 'Eliminar alerta', message: '¿Eliminar "' + r.titulo + '"?', danger: true, confirmText: 'Eliminar' })
+          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Alerta eliminada'); } });
       }
     });
     return el('div', { class: 'rem-item rem-' + status + (isDone ? ' is-done' : '') }, [
@@ -310,68 +288,6 @@
       ]),
       action
     ]);
-  }
-
-  function calendarCard(hoy) {
-    var card = el('div', { class: 'card rem-cal-card' });
-    var y = remCal.y, m = remCal.m;
-    var first = new Date(y, m, 1);
-
-    card.appendChild(el('div', { class: 'rem-cal-head' }, [
-      el('button', { class: 'icon-btn', html: '‹', 'aria-label': 'Mes anterior', onclick: function () { stepMonth(-1); } }),
-      el('h3', { text: fin.MESES_LARGO[m] + ' ' + y }),
-      el('button', { class: 'icon-btn', html: '›', 'aria-label': 'Mes siguiente', onclick: function () { stepMonth(1); } })
-    ]));
-
-    var grid = el('div', { class: 'rem-cal-grid' });
-    ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do'].forEach(function (d) { grid.appendChild(el('div', { class: 'rem-cal-dow', text: d })); });
-    var startDow = (first.getDay() + 6) % 7;
-    var daysInMonth = new Date(y, m + 1, 0).getDate();
-    for (var i = 0; i < startDow; i++) grid.appendChild(el('div', { class: 'rem-cal-cell is-empty' }));
-    var reminders = store.getReminders();
-    var events = autoEvents(hoy, true);
-    function dayItems(dayIso) {
-      var st = dayIso < hoy ? 'overdue' : (dayIso === hoy ? 'today' : 'upcoming');
-      var rems = reminders.filter(function (r) { return reminderOnDay(r, dayIso); })
-        .map(function (r) { return { r: r, date: dayIso, status: occDone(r, dayIso) ? 'done' : st }; });
-      var evs = events.filter(function (e) { return e.date === dayIso; });
-      return rems.concat(evs);
-    }
-    for (var day = 1; day <= daysInMonth; day++) {
-      (function (day) {
-        var dayIso = isoOf(new Date(y, m, day));
-        var items = dayItems(dayIso);
-        var hasPend = items.some(function (x) { return x.auto ? true : !occDone(x.r, dayIso); });
-        grid.appendChild(el('button', {
-          class: 'rem-cal-cell' + (dayIso === hoy ? ' is-today' : '') + (dayIso === remCal.sel ? ' is-sel' : '') + (items.length ? ' has-rem' : ''),
-          onclick: function () { remCal.sel = dayIso; App.router.render(); }
-        }, [
-          el('span', { class: 'rem-cal-num', text: day }),
-          items.length ? el('span', { class: 'rem-cal-dot' + (hasPend ? '' : ' is-done'), text: items.length > 1 ? String(items.length) : '' }) : null
-        ]));
-      })(day);
-    }
-    card.appendChild(grid);
-
-    var selItems = dayItems(remCal.sel).sort(function (a, x) {
-      var ha = (a.r && a.r.hora) || '99:99', hx = (x.r && x.r.hora) || '99:99';
-      return ha.localeCompare(hx);
-    });
-    card.appendChild(el('div', { class: 'rem-cal-day' }, [
-      el('div', { class: 'rem-cal-day-head' }, [
-        el('strong', { text: fmt.dateLong(remCal.sel) }),
-        el('button', { class: 'btn btn-sm btn-ghost', html: '<span>＋</span> Recordatorio', onclick: function () { App.forms.reminderForm(null, remCal.sel); } })
-      ]),
-      selItems.length ? remList(selItems, hoy) : el('p', { class: 'form-help', text: 'Nada este día.' })
-    ]));
-    return card;
-
-    function stepMonth(delta) {
-      var nm = remCal.m + delta;
-      remCal.y += Math.floor(nm / 12);
-      remCal.m = ((nm % 12) + 12) % 12;
-      App.router.render();
-    }
   }
 
   /* ============================== ECONOMÍA ============================ */
