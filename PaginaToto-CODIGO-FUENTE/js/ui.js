@@ -199,9 +199,57 @@
   }
   function money2(name, valueMonto, valueMoneda) {
     // grupo monto + moneda
-    var monto = input({ type: 'text', inputmode: 'decimal', name: name, value: valueMonto != null ? valueMonto : '', placeholder: '0', class: 'input money-input' });
+    var monto = moneyInput({ name: name, value: valueMonto != null ? valueMonto : '', placeholder: '0', class: 'input money-input' });
     var moneda = select([{ value: 'ARS', label: 'Pesos (ARS)' }, { value: 'USD', label: 'Dólares (USD)' }], valueMoneda || 'ARS', { name: name + 'Moneda', class: 'input select moneda-select' });
     return { wrap: el('div', { class: 'money-group' }, [monto, moneda]), monto: monto, moneda: moneda };
+  }
+
+  /* ------------------- Input numérico con separador de miles ---------- */
+  // Formatea en vivo mientras el usuario escribe (1000000 -> 1.000.000),
+  // acepta pegar, borrar y editar, y mantiene el cursor en una posición
+  // razonable. El valor mostrado es siempre compatible con store.num()
+  // (que ya interpreta correctamente "1.500.000,50"), así que ningún
+  // cálculo cambia: solo cambia cómo se ve mientras se escribe.
+  function numberToDisplay(n, allowNegative) {
+    if (n == null || n === '') return '';
+    n = +n;
+    if (isNaN(n)) return '';
+    var neg = n < 0 && allowNegative;
+    n = Math.abs(n);
+    var parts = String(n).split('.');
+    var intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var decPart = parts[1] ? parts[1].slice(0, 2) : null;
+    return (neg ? '-' : '') + intPart + (decPart ? ',' + decPart : '');
+  }
+  function formatTypedNumber(s, allowNegative) {
+    var neg = allowNegative && s.charAt(0) === '-';
+    s = s.replace(/[^0-9,]/g, '');
+    var ci = s.indexOf(',');
+    var intPart = ci >= 0 ? s.slice(0, ci) : s;
+    var decPart = ci >= 0 ? s.slice(ci + 1).replace(/,/g, '').slice(0, 2) : null;
+    intPart = intPart.replace(/^0+(?=\d)/, '');
+    var withDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var out = (neg ? '-' : '') + (withDots || (decPart != null ? '0' : ''));
+    if (decPart != null) out += ',' + decPart;
+    return out;
+  }
+  function moneyInput(attrs) {
+    attrs = Object.assign({}, attrs);
+    var allowNegative = !!attrs.allowNegative;
+    delete attrs.allowNegative;
+    var initVal = attrs.value;
+    attrs.value = (initVal != null && initVal !== '') ? numberToDisplay(initVal, allowNegative) : '';
+    var inp = input(Object.assign({ inputmode: 'decimal' }, attrs));
+    inp.addEventListener('input', function () {
+      var before = inp.value, caret = inp.selectionStart == null ? before.length : inp.selectionStart;
+      var digitsBeforeCaret = (before.slice(0, caret).match(/[0-9]/g) || []).length;
+      var formatted = formatTypedNumber(before, allowNegative);
+      if (formatted !== before) inp.value = formatted;
+      var pos = 0, seen = 0;
+      while (pos < formatted.length && seen < digitsBeforeCaret) { if (/[0-9]/.test(formatted[pos])) seen++; pos++; }
+      try { inp.setSelectionRange(pos, pos); } catch (e) {}
+    });
+    return inp;
   }
 
   /* ---------------- (Se quitó la carga de fotos) ------------------- */
@@ -247,6 +295,7 @@
     el: el, clear: clear, qs: qs, qsa: qsa, appendChildren: appendChildren,
     toast: toast, modal: modal, confirm: confirm,
     field: field, input: input, textarea: textarea, select: select, money2: money2,
+    moneyInput: moneyInput,
     carIcon: carIcon,
     downloadFile: downloadFile, toCSV: toCSV,
     estadoBadge: estadoBadge, docBadge: docBadge, pill: pill, resultBadge: resultBadge,

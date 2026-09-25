@@ -215,7 +215,8 @@
       el('div', { class: 'row-main' }, [
         el('div', { class: 'row-title-line' }, [
           el('span', { class: 'row-name', text: store.vehicleName(v) }),
-          ui.estadoBadge(v.estado)
+          ui.estadoBadge(v.estado),
+          (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consignación', 'pill-warn') : null
         ]),
         el('div', { class: 'row-meta' }, [
           v.version ? el('span', { text: v.version }) : null,
@@ -238,10 +239,10 @@
     var fAnio = ui.input({ value: filters.anio, inputmode: 'numeric', placeholder: 'Año' });
     var fEstado = ui.select([{ value: '', label: 'Todos' }, { value: 'stock', label: 'En stock' }, { value: 'reservado', label: 'Reservado' }, { value: 'vendido', label: 'Vendido' }], filters.estado);
     var fVendido = ui.select([{ value: '', label: 'Todos' }, { value: 'si', label: 'Vendidos' }, { value: 'no', label: 'No vendidos' }], filters.vendido);
-    var fPMin = ui.input({ value: filters.precioMin, inputmode: 'decimal', placeholder: 'Mín' });
-    var fPMax = ui.input({ value: filters.precioMax, inputmode: 'decimal', placeholder: 'Máx' });
-    var fGMin = ui.input({ value: filters.gananciaMin, inputmode: 'decimal', placeholder: 'Mín' });
-    var fGMax = ui.input({ value: filters.gananciaMax, inputmode: 'decimal', placeholder: 'Máx' });
+    var fPMin = ui.moneyInput({ value: filters.precioMin, placeholder: 'Mín' });
+    var fPMax = ui.moneyInput({ value: filters.precioMax, placeholder: 'Máx' });
+    var fGMin = ui.moneyInput({ value: filters.gananciaMin, placeholder: 'Mín', allowNegative: true });
+    var fGMax = ui.moneyInput({ value: filters.gananciaMax, placeholder: 'Máx', allowNegative: true });
     var fCD = ui.input({ value: filters.compraDesde, type: 'date' });
     var fCH = ui.input({ value: filters.compraHasta, type: 'date' });
     var fVD = ui.input({ value: filters.ventaDesde, type: 'date' });
@@ -297,13 +298,14 @@
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
     var m = fin.vehicleMetrics(v);
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
     var wrap = el('div', { class: 'page vehicle-detail' });
 
-    // acción principal: registrar compra (si falta) o registrar venta (si ya
-    // se puede vender); "Agregar gasto" siempre visible. El resto de las
-    // acciones (antes todas sueltas acá arriba) quedan en el menú "⋯".
+    // acción principal: registrar compra (si falta y no es consignación) o
+    // registrar venta (si ya se puede vender); "Agregar gasto" siempre
+    // visible. El resto de las acciones quedan en el menú "⋯".
     var primaryActions = [];
-    if (!v.purchase) {
+    if (!v.purchase && !esConsignacion) {
       primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }));
     } else if (v.estado !== 'vendido') {
       primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }));
@@ -330,7 +332,8 @@
           el('div', { class: 'detail-patente', text: v.patente || 'Sin patente' }),
           el('div', { class: 'detail-sub' }, [
             ui.estadoBadge(v.estado), ui.docBadge(v.documentacion),
-            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null
+            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null,
+            esConsignacion ? ui.pill('🤝 Consignación', 'pill-warn') : null
           ])
         ])
       ]),
@@ -363,11 +366,10 @@
       })));
     }
 
-    // tabs — reducidas a 4 secciones conceptuales. No se perdió ninguna
-    // funcionalidad: Compra + Gastos + Venta + Rentabilidad ahora viven
-    // juntas dentro de "Economía" (mismas funciones tabCompra/tabGastos/
-    // tabVenta/tabRentabilidad, solo concatenadas); Documentación + Checklist
-    // viven juntas dentro de "Documentación" (mismas tabDocs/tabChecklist).
+    // tabs — reducidas a 4 secciones conceptuales: Compra + Gastos + Venta +
+    // Rentabilidad viven juntas dentro de "Economía" (mismas funciones
+    // tabCompra/tabGastos/tabVenta/tabRentabilidad, solo concatenadas);
+    // "Documentación" muestra tabDocs (el Checklist se eliminó de la app).
     // Observaciones se movió a Resumen (ver tabResumen) y ya no es pestaña propia.
     var tabsWrap = el('div', { class: 'tabs' });
     var panel = el('div', { class: 'tab-panel' });
@@ -438,18 +440,50 @@
     ]);
   }
 
+  // Tarjeta "Consignación": el vehículo sigue siendo del dueño, el negocio
+  // no lo compró. Reutiliza vehicleMetrics tal cual (gananciaARS ya
+  // descuenta lo que le corresponde al dueño — ver finance.js) y solo
+  // agrega, para mostrar, cuánto es ese importe del dueño.
+  function consignacionCard(v, m) {
+    var o = v.origin;
+    var duenoStr = (o.duenio && o.duenio.nombre) ? o.duenio.nombre + (o.duenio.telefono ? ' · ' + o.duenio.telefono : '') : '—';
+    var precioDuenoARS = m.precioDuenoARS;
+    var rows = [
+      ['Dueño', duenoStr],
+      ['Precio que pide el dueño', o.precioDueno ? fmt.money(o.precioDueno, o.monedaDueno) : '—'],
+      ['Fecha de ingreso', o.fecha ? fmt.date(o.fecha) : '—'],
+      o.notas ? ['Notas', o.notas] : null
+    ];
+    if (m.vendido) {
+      rows.push(['Vendido en', fmt.money(m.ventaARS)]);
+      rows.push(['Le corresponde al dueño', fmt.money(precioDuenoARS)]);
+      rows.push(['Ganancia del negocio', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong']);
+    } else {
+      rows.push(['Le corresponde al dueño al vender', fmt.money(precioDuenoARS)]);
+      if (v.precioPretendido) {
+        var margen = m.estimadoARS - precioDuenoARS - m.costoTotalARS;
+        rows.push(['Margen estimado del negocio', (margen >= 0 ? '+' : '') + fmt.money(margen), margen >= 0 ? 'pos strong' : 'neg strong']);
+      }
+    }
+    return el('div', { class: 'card info-card' }, [
+      el('h4', { text: '🤝 Consignación' }),
+      dl(rows)
+    ]);
+  }
+
   // Resumen: para entenderse en pocos segundos. Junta, en modo lectura, lo
   // esencial de cada sección (los mismos datos y cálculos de siempre — nada
   // se recalcula acá; el detalle interactivo completo sigue en Economía /
   // Documentación).
   function tabResumen(v, m) {
+    var esConsig = v.origin && v.origin.type === 'consignacion';
     var out = [];
     out.push(el('div', { class: 'grid-2' }, [
       el('div', { class: 'card' }, [el('h4', { text: 'Economía' }), dl([
-        ['Compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
+        esConsig ? null : ['Compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
         ['Gastos', fmt.money(m.gastosARS)],
         m.comisionARS ? ['Comisiones', fmt.money(m.comisionARS)] : null,
-        ['Inversión total', fmt.money(m.costoTotalARS), 'strong'],
+        esConsig ? null : ['Inversión total', fmt.money(m.costoTotalARS), 'strong'],
         ['Precio de venta', m.vendido ? fmt.money(v.sale.precio, v.sale.moneda) : 'Todavía no vendido'],
         m.vendido ? ['Ganancia', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong'] : null,
         m.vendido ? ['Rentabilidad', fmt.pct(m.rentabilidad), m.gananciaARS >= 0 ? 'pos' : 'neg'] : null,
@@ -469,30 +503,12 @@
     if (v.origin && v.origin.type === 'parte-de-pago') {
       out.push(origenCard(v, m));
     }
-    out.push(el('div', { class: 'grid-2' }, [
-      el('div', { class: 'card' }, [el('h4', { text: 'Documentación' }), ui.docBadge(v.documentacion)]),
-      el('div', { class: 'card' }, [
-        el('h4', { text: 'Checklist' }),
-        checklistGlance(v)
-      ])
-    ]));
+    if (esConsig) {
+      out.push(consignacionCard(v, m));
+    }
+    out.push(el('div', { class: 'card' }, [el('h4', { text: 'Documentación' }), ui.docBadge(v.documentacion)]));
     if (v.observaciones) out.push(el('div', { class: 'card' }, [el('h4', { text: 'Observaciones' }), el('p', { class: 'obs-text', text: v.observaciones })]));
     return out;
-  }
-
-  // Vista rápida (solo lectura) del checklist — el detalle interactivo
-  // (tildar/destildar) sigue en la pestaña Documentación (tabChecklist).
-  function checklistGlance(v) {
-    var items = App.forms.CHECKLIST_ITEMS;
-    var done = items.filter(function (it) { return v.checklist && v.checklist[it[0]]; }).length;
-    if (!done) return el('p', { class: 'form-help', text: 'Todavía no marcaste nada del checklist.' });
-    return el('div', {}, [
-      el('p', { class: 'form-help', text: done + ' / ' + items.length + ' completado' }),
-      el('div', { class: 'checklist-glance' }, items.map(function (it) {
-        var ok = !!(v.checklist && v.checklist[it[0]]);
-        return el('span', { class: 'checklist-glance-item' + (ok ? ' is-ok' : '') }, [el('span', { text: ok ? '✓' : '○' }), el('span', { text: it[1] })]);
-      }))
-    ]);
   }
 
   // "Economía" — junta, tal cual, Compra + Gastos + Venta + Rentabilidad
@@ -501,13 +517,13 @@
     return [].concat(tabCompra(v, m), tabGastos(v, m), tabVenta(v, m), tabRentabilidad(v, m));
   }
 
-  // "Documentación" — junta, tal cual, Documentación + Checklist (mismas
-  // funciones interactivas que ya existían).
+  // "Documentación" (la pestaña ya no incluye Checklist, se eliminó).
   function tabDocumentacion(v) {
-    return [].concat(tabDocs(v), tabChecklist(v));
+    return tabDocs(v);
   }
 
   function tabCompra(v, m) {
+    if (v.origin && v.origin.type === 'consignacion') return [consignacionCard(v, m)];
     if (!v.purchase) return [ui.emptyState('Todavía no registraste la compra de este vehículo.', '🧾'), el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }))];
     var p = v.purchase;
     var out = [el('div', { class: 'card-actions-head' }, [el('h4', { text: 'Compra' }), el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar compra', onclick: function () { App.forms.purchaseForm(v.id); } })])];
@@ -609,7 +625,7 @@
   }
 
   function tabVenta(v, m) {
-    if (!v.purchase) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', '🧾')];
+    if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', '🧾')];
     if (!v.sale) return [
       ui.emptyState('Este vehículo todavía no fue vendido.', '🏷️'),
       el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }))
@@ -725,23 +741,6 @@
       el('h4', { text: 'Estado de la documentación' }),
       el('div', { class: 'doc-options' }, opts.map(function (o) {
         return el('button', { class: 'doc-opt' + (v.documentacion === o[0] ? ' is-active' : ''), text: o[1], onclick: function () { store.updateVehicle(v.id, { documentacion: o[0] }); ui.toast('Documentación actualizada'); App.router.render(); } });
-      }))
-    ])];
-  }
-
-  function tabChecklist(v) {
-    var items = App.forms.CHECKLIST_ITEMS;
-    var done = items.filter(function (it) { return v.checklist && v.checklist[it[0]]; }).length;
-    return [el('div', { class: 'card' }, [
-      el('div', { class: 'card-actions-head' }, [el('h4', { text: 'Checklist de preparación' }), el('span', { class: 'count-tag', text: done + ' / ' + items.length })]),
-      el('div', { class: 'check-grid' }, items.map(function (it) {
-        var cb = el('input', { type: 'checkbox' });
-        cb.checked = !!(v.checklist && v.checklist[it[0]]);
-        cb.addEventListener('change', function () {
-          var cl = Object.assign({}, v.checklist); cl[it[0]] = cb.checked;
-          store.updateVehicle(v.id, { checklist: cl }, { silent: true });
-        });
-        return el('label', { class: 'check-item' }, [cb, el('span', { text: it[1] })]);
       }))
     ])];
   }

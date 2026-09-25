@@ -29,6 +29,9 @@
 
   function purchaseRate(v) {
     if (v.purchase && v.purchase.cotizacionUSD) return v.purchase.cotizacionUSD;
+    // consignación: no hay compra propia, pero puede tener su propia cotización
+    // de referencia (cargada al recibir el vehículo) para comparar en dólares.
+    if (v.origin && v.origin.type === 'consignacion' && v.origin.cotizacionUSD) return v.origin.cotizacionUSD;
     return currentRate();
   }
   function saleRate(v) {
@@ -77,10 +80,21 @@
     if (vendido && v.sale.tradeIn) tradeInARS = toARS(v.sale.tradeIn.valor, v.sale.tradeIn.moneda, sRate);
     if (vendido && v.sale.diferencia) diferenciaARS = toARS(v.sale.diferencia.monto, v.sale.diferencia.moneda, sRate);
 
-    var gananciaARS = vendido ? (ventaARS - costoTotalARS) : 0;
-    var gananciaUSD = vendido ? (ventaUSD - costoTotalUSD) : 0;
-    var rentabilidad = (vendido && costoTotalARS) ? (gananciaARS / costoTotalARS) * 100 : 0;
-    var rentabilidadUSD = (vendido && costoTotalUSD) ? (gananciaUSD / costoTotalUSD) * 100 : 0;
+    // Consignación: el vehículo no se compró, sigue siendo del dueño. Al
+    // venderlo hay que descontar lo que le corresponde a él — la ganancia
+    // del negocio es solo la diferencia. Mientras está en stock esto NO
+    // se suma a costoTotalARS (así no infla el capital invertido: el
+    // negocio no puso ese dinero).
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    var precioDuenoARS = 0, precioDuenoUSD = 0;
+    if (esConsignacion && v.origin.precioDueno) {
+      precioDuenoARS = toARS(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', pRate);
+      precioDuenoUSD = toUSD(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', pRate);
+    }
+    var gananciaARS = vendido ? (ventaARS - costoTotalARS - precioDuenoARS) : 0;
+    var gananciaUSD = vendido ? (ventaUSD - costoTotalUSD - precioDuenoUSD) : 0;
+    var rentabilidad = (vendido && (costoTotalARS + precioDuenoARS)) ? (gananciaARS / (costoTotalARS + precioDuenoARS)) * 100 : 0;
+    var rentabilidadUSD = (vendido && (costoTotalUSD + precioDuenoUSD)) ? (gananciaUSD / (costoTotalUSD + precioDuenoUSD)) * 100 : 0;
 
     // Valor estimado en stock: precio pretendido, si existe; si no, la inversión total
     var estimadoARS = inversionARS;
@@ -137,6 +151,7 @@
       tradeInARS: tradeInARS, diferenciaARS: diferenciaARS,
       gananciaARS: gananciaARS, gananciaUSD: gananciaUSD,
       rentabilidad: rentabilidad, rentabilidadUSD: rentabilidadUSD,
+      esConsignacion: esConsignacion, precioDuenoARS: precioDuenoARS, precioDuenoUSD: precioDuenoUSD,
       estimadoARS: estimadoARS,
       diasEnStock: diasEnStock(v),
       purchaseRate: pRate, saleRate: sRate,
@@ -161,8 +176,10 @@
   }
 
   function diasEnStock(v) {
-    if (!v.purchase || !v.purchase.fecha) return null;
-    var desde = parseDate(v.purchase.fecha);
+    // en consignación no hay fecha de compra: se cuenta desde que ingresó
+    var fechaDesde = v.purchase ? v.purchase.fecha : (v.origin && v.origin.type === 'consignacion' ? v.origin.fecha : null);
+    if (!fechaDesde) return null;
+    var desde = parseDate(fechaDesde);
     var hasta = (v.sale && v.sale.fecha) ? parseDate(v.sale.fecha) : new Date();
     if (!desde) return null;
     var ms = hasta - desde;
@@ -182,16 +199,22 @@
   // dólares: cada parte se convierte con su propia cotización histórica
   // (la de la compra, o la del gasto si se cargó una distinta).
   function dollarComparison(v, dolarActualManual) {
-    if (!v.purchase) return null;
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    if (!v.purchase && !esConsignacion) return null;
     var m = vehicleMetrics(v);
-    var pRate = v.purchase.cotizacionUSD || null;
+    var pRate = esConsignacion ? (v.origin.cotizacionUSD || null) : (v.purchase.cotizacionUSD || null);
+    var monedaRef = esConsignacion ? (v.origin.monedaDueno || 'ARS') : v.purchase.moneda;
 
-    var compraARS = m.compraARS;
+    // En consignación no hubo compra propia: la referencia de "lo que costó"
+    // es lo que le corresponde al dueño (ver vehicleMetrics). m.compraARS/USD
+    // ya da 0 en ese caso, así que sumar precioDuenoARS/USD es exactamente
+    // reemplazarlo por el valor correcto sin duplicar nada.
+    var compraARS = m.compraARS + m.precioDuenoARS;
     var gastosARS = m.gastosARS;
-    var inversionARS = m.inversionARS;          // compra + gastos, en pesos (nominal)
-    var compraUSD = m.compraUSD;                // compra en USD (cotización de compra)
+    var inversionARS = compraARS + gastosARS;    // "compra" + gastos, en pesos (nominal)
+    var compraUSD = m.compraUSD + m.precioDuenoUSD;
     var gastosUSD = m.gastosUSD;                // gastos en USD (cotización de cada gasto)
-    var inversionUSD = m.inversionUSD;          // compra + gastos, en USD
+    var inversionUSD = compraUSD + gastosUSD;   // "compra" + gastos, en USD
     var valorUSD = inversionUSD;                // "valor equivalente en dólares" ahora incluye los gastos
     var dolarActual = +dolarActualManual || currentRate();
 
@@ -202,12 +225,13 @@
       compraUSD: compraUSD,
       gastosUSD: gastosUSD,
       inversionUSD: inversionUSD,
-      dolarCompra: pRate || (v.purchase.moneda === 'USD' ? (v.purchase.cotizacionUSD || null) : currentRate()),
+      dolarCompra: pRate || (monedaRef === 'USD' ? pRate : currentRate()),
       valorUSD: valorUSD,
       dolarActual: dolarActual,
       valorActualizadoARS: valorUSD != null ? valorUSD * dolarActual : null,
       diferenciaARS: null,
-      resultado: null
+      resultado: null,
+      esConsignacion: esConsignacion
     };
     if (out.valorActualizadoARS != null) {
       out.diferenciaARS = out.valorActualizadoARS - inversionARS;

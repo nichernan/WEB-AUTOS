@@ -213,6 +213,18 @@ img { max-width: 100%; display: block; }
 .resumen-nav-body strong { font-size: .96rem; }
 .resumen-nav-body span { font-size: .82rem; color: var(--c-text-mute); }
 
+/* Economía: menú de módulos en tarjetas grandes */
+.module-grid { gap: 14px; }
+.module-card {
+  min-height: 138px; align-items: center; justify-content: center; text-align: center;
+  gap: 8px; cursor: pointer; transition: border-color .12s, background .12s, transform .05s;
+}
+.module-card:hover { border-color: var(--c-primary); background: var(--c-surface-2); }
+.module-card:active { transform: scale(.98); }
+.module-card-ico { font-size: 2rem; line-height: 1; }
+.module-card-title { font-size: 1rem; }
+.module-card-desc { font-size: .8rem; color: var(--c-text-mute); }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 
@@ -582,6 +594,18 @@ body.modal-open { overflow: hidden; }
 .cmp-explain li { margin-bottom: 4px; }
 .cmp-two-col .cmp-col { background: var(--c-surface-2); padding: 12px; border-radius: 10px; }
 
+/* ==================== Historial de comparaciones dólar ============= */
+.cmp-hist-item {
+  display: flex; align-items: center; gap: 13px; padding: 12px 6px;
+  border-bottom: 1px solid var(--c-border); transition: background .1s;
+}
+.cmp-hist-item:last-child { border-bottom: none; }
+.cmp-hist-item:hover { background: var(--c-surface-2); }
+.cmp-hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmp-hist-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cmp-hist-result { font-weight: 700; font-size: .98rem; flex-shrink: 0; }
+.cmp-hist-detail { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: var(--c-text-soft); flex-wrap: wrap; }
+
 /* ========================= Contact / trash =============== */
 .contact-item { border-bottom: 1px solid var(--c-border); padding: 8px 0; }
 .contact-item summary { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
@@ -938,6 +962,27 @@ details.card[open] > summary { margin-bottom: 10px; }
 .auth-err { color: var(--c-danger); font-size: .85rem; margin: 0; min-height: 1em; }
 .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: .95rem; }
 .auth-hint { color: var(--c-text-mute); font-size: .8rem; margin: 4px 0 0; line-height: 1.4; }
+
+/* ==================== Ajustes: secciones y filas ================== */
+.settings-section { display: flex; flex-direction: column; gap: 10px; }
+.settings-group {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.settings-group.danger-zone { border-color: var(--c-danger-soft); }
+.settings-row {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  cursor: pointer; border-bottom: 1px solid var(--c-border); transition: background .12s;
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row:hover { background: var(--c-surface-2); }
+.settings-row-ico { font-size: 1.2rem; width: 26px; text-align: center; flex-shrink: 0; line-height: 1; }
+.settings-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.settings-row-body strong { font-size: .92rem; font-weight: 620; }
+.settings-row-body span { font-size: .8rem; color: var(--c-text-mute); }
+.settings-row-chevron { font-size: 1.15rem; color: var(--c-text-mute); flex-shrink: 0; }
+.settings-row.is-danger .settings-row-body strong { color: var(--c-danger); }
+.settings-row.is-danger .settings-row-ico { color: var(--c-danger); }
 
 /* ==================== Ajustes: usuarios ========================== */
 .sidebar-user {

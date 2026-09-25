@@ -123,7 +123,7 @@
       var m = fin.vehicleMetrics(v);
       var hoy = store.todayISO();
       var s = store.getState().settings;
-      if (!v.purchase) out.push({ level: 'warn', icon: '🧾', text: 'Falta registrar la compra', vehicleId: v.id });
+      if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) out.push({ level: 'warn', icon: '🧾', text: 'Falta registrar la compra', vehicleId: v.id });
       if (v.purchase && !v.purchase.cotizacionUSD && v.purchase.moneda === 'ARS') out.push({ level: 'info', icon: '💵', text: 'Falta la cotización del dólar en la compra', vehicleId: v.id });
       if (v.estado === 'vendido' && v.sale) {
         if (!v.sale.precio) out.push({ level: 'warn', icon: '🏷️', text: 'Falta registrar el precio de venta', vehicleId: v.id });
@@ -179,8 +179,8 @@
 
     var wrap = el('div', { class: 'page alertas-page' });
 
-    var head = pageHead('Alertas', 'Cuotas, recordatorios y situaciones de los vehículos');
-    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nuevo recordatorio', onclick: function () { App.forms.reminderForm(null, remCal.sel); } }));
+    var head = pageHead('Alertas', 'Qué tenés pendiente, vencido y para hoy');
+    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nueva alerta', onclick: function () { App.forms.reminderForm(null, remCal.sel); } }));
     wrap.appendChild(head);
 
     // Resumen (chips)
@@ -375,52 +375,59 @@
   }
 
   /* ============================== ECONOMÍA ============================ */
-  // Agrupa, en pestañas, las secciones que antes eran páginas propias del
-  // menú (Situación económica = ex "Finanzas", Gastos del negocio, Cuotas
-  // y cobros, Comparación dólar). Cada pestaña reutiliza tal cual la vista
-  // que ya existía (misma función, mismos datos, misma lógica) — acá solo
-  // se decide en qué contenedor se dibuja. "Resúmenes" es una página aparte
-  // (misma info, otra forma de mirarla) a la que se llega con el botón de
-  // arriba a la derecha, sin duplicar ningún cálculo.
-  var economiaTab = 'situacion';
+  // Pantalla principal: menú de módulos en tarjetas (mismo patrón de estado
+  // interno + volverLink ya usado en Resúmenes/Cuotas/Ajustes, sin rutas
+  // nuevas). Cada módulo reutiliza tal cual la vista que ya existía (misma
+  // función, mismos datos, misma lógica) — acá solo se decide en qué
+  // contenedor se dibuja.
+  var MODULOS_ECONOMIA = [
+    ['situacion', '💰', 'Situación económica', 'Resultado, capital y stock del negocio', finanzasView],
+    ['gastos', '🏢', 'Gastos del negocio', 'Alquiler, sueldos y otros gastos fijos', gastosNegocioView],
+    ['cuotas', '💳', 'Cuotas y cobros', 'Lo que pagás y lo que te pagan', cuotasView],
+    ['dolar', '💵', 'Comparar dólar', 'El valor de tus operaciones en dólares', function (panel) { comparacionView(panel); }],
+    ['resumenes', '📊', 'Resúmenes', 'Totales por período y estadísticas', resumenesView]
+  ];
+  var economiaScreen = 'home';
   function economiaView(root) {
     var wrap = el('div', { class: 'page page-economia' });
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
         el('h1', { text: 'Economía' }),
-        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas, comparación del dólar y resúmenes' })
+        el('p', { class: 'page-sub', text: 'Elegí qué querés ver' })
       ])
     ]));
 
-    var TABS = [
-      ['situacion', 'Situación económica', finanzasView],
-      ['gastos', 'Gastos del negocio', gastosNegocioView],
-      ['cuotas', 'Cuotas y cobros', cuotasView],
-      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }],
-      ['resumenes', 'Resúmenes', resumenesView]
-    ];
-    var tabsWrap = el('div', { class: 'tabs' });
-    var panel = el('div', { class: 'tab-panel' });
-
-    function renderTab(key) {
-      ui.clear(panel);
-      var t = TABS.filter(function (x) { return x[0] === key; })[0] || TABS[0];
-      t[2](panel);
-    }
-    TABS.forEach(function (t) {
-      var b = el('button', { class: 'tab' + (t[0] === economiaTab ? ' is-active' : ''), text: t[1], onclick: function () {
-        economiaTab = t[0];
-        ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
-        b.classList.add('is-active');
-        renderTab(t[0]);
-      } });
-      tabsWrap.appendChild(b);
-    });
-
-    wrap.appendChild(tabsWrap);
-    wrap.appendChild(panel);
-    renderTab(economiaTab);
+    // class "tab-panel": la regla CSS que le da a Economía su ancho amplio
+    // (.page-economia .tab-panel .page) sigue aplicando igual que antes.
+    var content = el('div', { class: 'tab-panel' });
+    wrap.appendChild(content);
     root.appendChild(wrap);
+
+    function goScreen(key) { economiaScreen = key; render(); }
+    function volverLink() {
+      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Economía', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
+    }
+
+    function render() {
+      ui.clear(content);
+      var mod = MODULOS_ECONOMIA.filter(function (m) { return m[0] === economiaScreen; })[0];
+      if (mod) {
+        content.appendChild(volverLink());
+        var panel = el('div', { style: 'margin-top:6px' });
+        content.appendChild(panel);
+        mod[4](panel);
+        return;
+      }
+      economiaScreen = 'home';
+      content.appendChild(el('div', { class: 'grid-2 module-grid' }, MODULOS_ECONOMIA.map(function (m) {
+        return el('div', { class: 'card module-card', onclick: function () { goScreen(m[0]); } }, [
+          el('span', { class: 'module-card-ico', text: m[1] }),
+          el('strong', { class: 'module-card-title', text: m[2] }),
+          el('span', { class: 'module-card-desc', text: m[3] })
+        ]);
+      })));
+    }
+    render();
   }
 
   /* =============================== FINANZAS =========================== */
@@ -466,7 +473,10 @@
         var m = fin.vehicleMetrics(v);
         var dif = m.estimadoARS - m.costoTotalARS;
         stb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
-          el('td', {}, el('span', { class: 'cell-name', text: store.vehicleName(v) })),
+          el('td', {}, [
+            el('span', { class: 'cell-name', text: store.vehicleName(v) }),
+            (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consig.', 'pill-warn') : null
+          ]),
           el('td', { text: fmt.money(m.costoTotalARS) }),
           el('td', { text: fmt.money(m.estimadoARS) }),
           el('td', { class: dif >= 0 ? 'pos' : 'neg', text: (dif >= 0 ? '+' : '') + fmt.money(dif) })
@@ -477,29 +487,11 @@
     }
     wrap.appendChild(stockCard);
 
-    // --- Rendimiento: mismos indicadores que ya calculaba la app, en filas compactas ---
-    var perfItems = [
-      ['Mayor ganancia', g.mayorGanancia, function (x) { return fmt.money(x.m.gananciaARS); }],
-      ['Venta más rápida', g.vendidoMasRapido, function (x) { return fmt.days(x.m.diasEnStock); }],
-      ['Más tiempo en stock', g.masTiempoStock, function (x) { return fmt.days(x.m.diasEnStock); }],
-      ['Mayor venta', g.mayorVenta, function (x) { return fmt.money(x.m.ventaARS); }]
-    ];
-    var rendCard = el('div', { class: 'card' }, [
-      el('h3', { text: '📈 Rendimiento' }),
-      el('div', { class: 'perf-list' }, perfItems.map(function (it) {
-        var label = it[0], w = it[1], valFn = it[2];
-        return el('div', { class: 'perf-row' }, [
-          el('span', { class: 'perf-label', text: label }),
-          w && w.v
-            ? el('a', { class: 'perf-name', href: '#/vehiculo/' + w.v.id, text: store.vehicleName(w.v) })
-            : el('span', { class: 'perf-name muted', text: '—' }),
-          el('span', { class: 'perf-value', text: w && w.v ? valFn(w) : '—' })
-        ]);
-      }))
-    ]);
-
     // --- Pendientes: cuotas por cobrar/pagar, gastos fijos y diferencia en USD ---
-    var pendCard = el('div', { class: 'card' }, [
+    // ("Rendimiento" se sacó de esta pantalla — los mismos datos
+    // (g.mayorGanancia, g.vendidoMasRapido, g.masTiempoStock, g.mayorVenta)
+    // se siguen usando tal cual en Resúmenes → Estadísticas del negocio.)
+    wrap.appendChild(el('div', { class: 'card' }, [
       el('h3', { text: '💰 Pendientes' }),
       el('div', { class: 'grid-2' }, [
         miniStat('Por cobrar', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
@@ -507,12 +499,7 @@
         miniStat('Gastos del negocio', fmt.money(g.gastosFijosTotales)),
         miniStat('Diferencia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg')
       ])
-    ]);
-
-    // En desktop quedan lado a lado (mismo .grid-2 que ya colapsa a 1
-    // columna en mobile); en la tarjeta de Pendientes se reutiliza esa
-    // misma clase para su propia grilla interna de 4 mini-stats.
-    wrap.appendChild(el('div', { class: 'grid-2' }, [rendCard, pendCard]));
+    ]));
 
     root.appendChild(wrap);
   }
@@ -839,17 +826,131 @@
   }
 
   /* ==================== COMPARACIÓN DEL VALOR SEGÚN EL DÓLAR ========= */
+  // Junta, sin guardar nada nuevo, todas las ventas (compradas o en
+  // consignación) que tengan una comparación en dólares calculable —
+  // se arma en el momento con fin.dollarComparison() sobre los datos
+  // reales, así que no hay que volver a cargar nada a mano.
+  function comparacionesVendidas() {
+    var out = [];
+    store.activeVehicles().forEach(function (v) {
+      if (!v.sale || !v.sale.precio) return;
+      var c = fin.dollarComparison(v);
+      if (c && c.venta) out.push({ v: v, c: c });
+    });
+    return out;
+  }
+
+  var historialCmpState = { q: '', sort: 'fecha-desc', filtro: 'todos' };
+  function historialComparacionesView(panel, volver) {
+    var wrap = el('div', {});
+    wrap.appendChild(el('a', { class: 'back-link', href: '#', html: '‹ Volver a Comparar dólar', onclick: function (e) { e.preventDefault(); volver(); } }));
+    wrap.appendChild(el('h1', { text: 'Historial de comparaciones', style: 'margin-top:6px' }));
+    wrap.appendChild(el('p', { class: 'page-sub', text: 'Ventas con comparación en dólares, calculado con los datos reales de cada operación.' }));
+
+    var searchInput = ui.input({ value: historialCmpState.q, placeholder: 'Buscar vehículo...', class: 'input search-input' });
+    var sortSel = ui.select([
+      { value: 'fecha-desc', label: 'Más reciente' }, { value: 'fecha-asc', label: 'Más antiguo' },
+      { value: 'resultado-desc', label: 'Mayor ganancia' }, { value: 'resultado-asc', label: 'Mayor pérdida' }
+    ], historialCmpState.sort, { class: 'input select sort-select' });
+    var filtroSeg = el('div', { class: 'seg-control' }, [
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'todos' ? ' is-active' : ''), text: 'Todos', onclick: function () { historialCmpState.filtro = 'todos'; draw(); } }),
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'ganancia' ? ' is-active' : ''), text: 'Ganancias', onclick: function () { historialCmpState.filtro = 'ganancia'; draw(); } }),
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'perdida' ? ' is-active' : ''), text: 'Pérdidas', onclick: function () { historialCmpState.filtro = 'perdida'; draw(); } })
+    ]);
+    wrap.appendChild(el('div', { class: 'toolbar' }, [
+      el('div', { class: 'toolbar-search' }, searchInput),
+      el('div', { class: 'toolbar-actions' }, [sortSel])
+    ]));
+    wrap.appendChild(filtroSeg);
+
+    var listWrap = el('div', { class: 'vehicle-list' });
+    var countEl = el('span', { class: 'count-tag' });
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('div', { class: 'card-head' }, [el('h3', { text: 'Ventas comparadas' }), countEl]),
+      listWrap
+    ]));
+
+    searchInput.addEventListener('input', function () { historialCmpState.q = searchInput.value; draw(); });
+    sortSel.addEventListener('change', function () { historialCmpState.sort = sortSel.value; draw(); });
+
+    function draw() {
+      ui.qsa('.seg', filtroSeg).forEach(function (b) { b.classList.toggle('is-active', b.textContent === ({ todos: 'Todos', ganancia: 'Ganancias', perdida: 'Pérdidas' })[historialCmpState.filtro]); });
+      var all = comparacionesVendidas();
+      var q = historialCmpState.q.trim().toLowerCase();
+      var list = all.filter(function (x) {
+        if (q && store.vehicleName(x.v).toLowerCase().indexOf(q) < 0) return false;
+        var gan = x.c.venta.gananciaUSD || 0;
+        if (historialCmpState.filtro === 'ganancia' && gan < 0) return false;
+        if (historialCmpState.filtro === 'perdida' && gan >= 0) return false;
+        return true;
+      });
+      list.sort(function (a, b) {
+        if (historialCmpState.sort === 'fecha-asc') return (a.v.sale.fecha || '').localeCompare(b.v.sale.fecha || '');
+        if (historialCmpState.sort === 'fecha-desc') return (b.v.sale.fecha || '').localeCompare(a.v.sale.fecha || '');
+        var ga = a.c.venta.gananciaUSD || 0, gb = b.c.venta.gananciaUSD || 0;
+        return historialCmpState.sort === 'resultado-desc' ? gb - ga : ga - gb;
+      });
+      ui.clear(listWrap);
+      countEl.textContent = list.length + ' de ' + all.length;
+      if (!list.length) { listWrap.appendChild(ui.emptyState('No hay ventas con comparación en dólares todavía.', '💵')); return; }
+      list.forEach(function (x) { listWrap.appendChild(cmpHistItem(x.v, x.c)); });
+    }
+    draw();
+
+    panel.appendChild(wrap);
+  }
+
+  function cmpHistItem(v, c) {
+    var vv = c.venta;
+    var gan = vv.gananciaUSD;
+    var pos = (gan || 0) >= 0;
+    return el('a', { class: 'cmp-hist-item', href: '#/vehiculo/' + v.id }, [
+      el('div', { class: 'cmp-hist-main' }, [
+        el('div', { class: 'cmp-hist-top' }, [
+          el('span', { class: 'row-name', text: store.vehicleName(v) }),
+          el('span', { class: 'cmp-hist-result ' + (pos ? 'pos' : 'neg'), text: gan != null ? ((pos ? '+' : '') + fmt.usd(gan)) : '—' })
+        ]),
+        el('div', { class: 'cmp-hist-detail' }, [
+          el('span', { text: 'Compra ' + (c.valorUSD != null ? fmt.usd(c.valorUSD) : '—') }),
+          el('span', { text: '→' }),
+          el('span', { text: 'Venta ' + (vv.valorUSDVenta != null ? fmt.usd(vv.valorUSDVenta) : '—') })
+        ]),
+        el('div', { class: 'home-stock-meta' }, [
+          el('span', { text: 'Vendido: ' + fmt.date(v.sale.fecha) }),
+          el('span', { text: 'Dólar compra: ' + (c.dolarCompra ? fmt.money(c.dolarCompra) : '—') }),
+          el('span', { text: 'Dólar venta: ' + (vv.dolarVenta ? fmt.money(vv.dolarVenta) : '—') })
+        ])
+      ]),
+      el('span', { class: 'pill ' + (pos ? 'pill-ok' : 'pill-danger'), text: pos ? 'Ganancia' : 'Pérdida' })
+    ]);
+  }
+
   function comparacionView(root, preselectId) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar'));
+    var panel = el('div', {});
 
-    var vehicles = store.getState().vehicles.filter(function (v) { return v.purchase; }); // incluye vendidos y en papelera (info histórica)
-    if (!vehicles.length) { wrap.appendChild(ui.emptyState('No hay vehículos con compra registrada para comparar.', '💵')); root.appendChild(wrap); return; }
+    var vehicles = store.getState().vehicles.filter(function (v) { return v.purchase || (v.origin && v.origin.type === 'consignacion'); }); // incluye vendidos y en papelera (info histórica)
+    if (!vehicles.length) {
+      wrap.appendChild(pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar'));
+      wrap.appendChild(ui.emptyState('No hay vehículos con compra o consignación registrada para comparar.', '💵'));
+      root.appendChild(wrap); return;
+    }
+
+    function showMain() { ui.clear(panel); renderMain(); }
+    function showHistorial() { ui.clear(panel); historialComparacionesView(panel, showMain); }
+    renderMain();
+    wrap.appendChild(panel);
+    root.appendChild(wrap);
+
+    function renderMain() {
+    var head = pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar');
+    head.appendChild(el('button', { class: 'btn btn-ghost', html: '<span>📜</span> Historial de comparaciones', onclick: showHistorial }));
+    panel.appendChild(head);
 
     var sel = ui.select(vehicles.map(function (v) {
       return { value: v.id, label: store.vehicleName(v) + (v.deleted ? ' (papelera)' : '') + (v.estado === 'vendido' ? ' · vendido' : '') };
     }), preselectId || vehicles[0].id);
-    var fDolar = ui.input({ inputmode: 'decimal', value: store.getState().settings.dolarActual || '', placeholder: 'Cotización actual del dólar' });
+    var fDolar = ui.moneyInput({ value: store.getState().settings.dolarActual || '', placeholder: 'Cotización actual del dólar' });
     var result = el('div', { class: 'cmp-dollar-result' });
 
     function calc() {
@@ -923,15 +1024,15 @@
     sel.addEventListener('change', calc);
     fDolar.addEventListener('input', calc);
 
-    wrap.appendChild(el('div', { class: 'card' }, [
+    panel.appendChild(el('div', { class: 'card' }, [
       el('div', { class: 'grid-2' }, [
         ui.field('Elegí un auto', sel),
         ui.field('Cotización actual del dólar', fDolar, 'Se ingresa manualmente y no modifica ningún valor histórico')
       ])
     ]));
-    wrap.appendChild(result);
+    panel.appendChild(result);
     calc();
-    root.appendChild(wrap);
+    }
   }
   function cmpItem(label, value, tag, tone, note) {
     return el('div', { class: 'cmp-item' }, [
@@ -1285,24 +1386,111 @@
   }
 
   /* ============================== AJUSTES ========================== */
+  // Pantalla principal: categorías con filas cliqueables (mismo patrón de
+  // estado interno + volverLink ya usado en Resúmenes y Cuotas/Cobros, sin
+  // rutas nuevas). Cada fila abre exactamente la misma tarjeta que ya
+  // existía (cuentaCard/usuariosCard/avisosCard/snapshotsCard/resetCard/
+  // excelAutosaveCard/datosCard/parametrosCard) — ninguna lógica cambió,
+  // solo dónde se muestra.
+  var ajustesScreen = 'home';
   function ajustesView(root) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Ajustes', 'Configuración general'));
+    wrap.appendChild(pageHead('Ajustes', 'Configurá la aplicación y tu cuenta'));
 
-    // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
-    wrap.appendChild(el('div', { class: 'card' }, [
+    var online = !!(App.auth && App.auth.enabled);
+    var isAdmin = online && App.auth.isAdmin();
+    var showDanger = !online || isAdmin;
+
+    var content = el('div', {});
+    wrap.appendChild(content);
+    root.appendChild(wrap);
+
+    function goScreen(key) { ajustesScreen = key; render(); }
+    function volverLink() {
+      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Ajustes', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
+    }
+
+    var SUBSCREENS = {
+      cuenta: function () { return cuentaCard(); },
+      usuarios: function () { return usuariosCard(); },
+      preferencias: function () { return avisosCard(); },
+      financiero: function () { return parametrosCard(); },
+      datos: function () { return [datosCard(), snapshotsCard()]; },
+      sync: function () { return excelAutosaveCard(); },
+      peligro: function () { return resetCard(); }
+    };
+
+    function render() {
+      ui.clear(content);
+      if (ajustesScreen !== 'home' && SUBSCREENS[ajustesScreen]) {
+        content.appendChild(volverLink());
+        ui.appendChildren(content, SUBSCREENS[ajustesScreen]());
+        return;
+      }
+      ajustesScreen = 'home';
+
+      var cuentaRows = [];
+      if (online) {
+        cuentaRows.push(settingsRow('👤', 'Mi cuenta', (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || 'Tu perfil y sesión', function () { goScreen('cuenta'); }));
+        if (isAdmin) cuentaRows.push(settingsRow('👥', 'Usuarios', 'Quién puede entrar a la app', function () { goScreen('usuarios'); }));
+      }
+      cuentaRows.push(settingsRow('⚙️', 'Preferencias', 'Avisos del navegador', function () { goScreen('preferencias'); }));
+
+      [
+        settingsSection('Cuenta', cuentaRows),
+        settingsSection('Negocio', [
+          settingsRow('💰', 'Configuración financiera', 'Dólar de referencia y alertas', function () { goScreen('financiero'); })
+        ]),
+        settingsSection('Datos y sistema', [
+          settingsRow('💾', 'Datos', 'Papelera, exportar y copias de seguridad', function () { goScreen('datos'); }),
+          settingsRow('🔄', 'Sincronización', 'Guardado automático en Excel', function () { goScreen('sync'); })
+        ]),
+        showDanger ? settingsSection('Zona peligrosa', [
+          settingsRow('⚠️', 'Acciones avanzadas', 'Borrar todos los datos de la app', function () { goScreen('peligro'); }, true)
+        ]) : null
+      ].filter(Boolean).forEach(function (s) { content.appendChild(s); });
+    }
+
+    render();
+  }
+
+  function settingsRow(icon, title, desc, onclick, danger) {
+    return el('div', { class: 'settings-row' + (danger ? ' is-danger' : ''), onclick: onclick }, [
+      el('span', { class: 'settings-row-ico', text: icon }),
+      el('div', { class: 'settings-row-body' }, [
+        el('strong', { text: title }),
+        el('span', { text: desc })
+      ]),
+      el('span', { class: 'settings-row-chevron', text: '›' })
+    ]);
+  }
+  function settingsSection(title, rows) {
+    rows = (rows || []).filter(Boolean);
+    if (!rows.length) return null;
+    var danger = rows.some(function (r) { return r.classList.contains('is-danger'); });
+    return el('div', { class: 'settings-section' }, [
+      el('div', { class: 'form-section-title', text: title }),
+      el('div', { class: 'settings-group' + (danger ? ' danger-zone' : '') }, rows)
+    ]);
+  }
+
+  // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
+  function datosCard() {
+    return el('div', { class: 'card' }, [
       el('h3', { text: '🗂️ Datos' }),
       el('div', { class: 'row-btns' }, [
         el('a', { class: 'btn btn-ghost', href: '#/papelera', html: '<span>🗑️</span> Papelera' }),
         el('a', { class: 'btn btn-ghost', href: '#/exportar', html: '<span>📤</span> Exportar' })
       ])
-    ]));
+    ]);
+  }
 
+  function parametrosCard() {
     var s = store.getState().settings;
-    var fDolar = ui.input({ inputmode: 'decimal', value: s.dolarActual });
+    var fDolar = ui.moneyInput({ value: s.dolarActual });
     var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
     var fCuota = ui.input({ inputmode: 'numeric', value: s.cuotaProximaDias });
-    wrap.appendChild(el('div', { class: 'card' }, [
+    return el('div', { class: 'card' }, [
       el('h3', { text: 'Parámetros' }),
       el('div', { class: 'grid-2' }, [
         ui.field('Cotización actual del dólar', fDolar, 'Referencia general. Las comparaciones permiten ingresar otra puntual.'),
@@ -1313,27 +1501,7 @@
         store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 });
         ui.toast('Ajustes guardados', 'success'); App.router.render();
       } })
-    ]));
-
-    // --- Usuarios (solo online + admin) ---
-    if (App.auth && App.auth.enabled) {
-      if (App.auth.isAdmin()) wrap.appendChild(usuariosCard());
-      wrap.appendChild(cuentaCard());
-    }
-
-    // --- Avisos del navegador ---
-    wrap.appendChild(avisosCard());
-
-    // --- Guardado automático en Excel ---
-    wrap.appendChild(excelAutosaveCard());
-
-    // --- Copias internas (restaurar) ---
-    wrap.appendChild(snapshotsCard());
-
-    // --- Zona peligrosa ---
-    if (!App.auth || !App.auth.enabled || App.auth.isAdmin()) wrap.appendChild(resetCard());
-
-    root.appendChild(wrap);
+    ]);
   }
 
   function cuentaCard() {

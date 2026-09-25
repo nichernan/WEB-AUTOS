@@ -223,6 +223,18 @@ img { max-width: 100%; display: block; }
 .resumen-nav-body strong { font-size: .96rem; }
 .resumen-nav-body span { font-size: .82rem; color: var(--c-text-mute); }
 
+/* Economía: menú de módulos en tarjetas grandes */
+.module-grid { gap: 14px; }
+.module-card {
+  min-height: 138px; align-items: center; justify-content: center; text-align: center;
+  gap: 8px; cursor: pointer; transition: border-color .12s, background .12s, transform .05s;
+}
+.module-card:hover { border-color: var(--c-primary); background: var(--c-surface-2); }
+.module-card:active { transform: scale(.98); }
+.module-card-ico { font-size: 2rem; line-height: 1; }
+.module-card-title { font-size: 1rem; }
+.module-card-desc { font-size: .8rem; color: var(--c-text-mute); }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 
@@ -592,6 +604,18 @@ body.modal-open { overflow: hidden; }
 .cmp-explain li { margin-bottom: 4px; }
 .cmp-two-col .cmp-col { background: var(--c-surface-2); padding: 12px; border-radius: 10px; }
 
+/* ==================== Historial de comparaciones dólar ============= */
+.cmp-hist-item {
+  display: flex; align-items: center; gap: 13px; padding: 12px 6px;
+  border-bottom: 1px solid var(--c-border); transition: background .1s;
+}
+.cmp-hist-item:last-child { border-bottom: none; }
+.cmp-hist-item:hover { background: var(--c-surface-2); }
+.cmp-hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmp-hist-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cmp-hist-result { font-weight: 700; font-size: .98rem; flex-shrink: 0; }
+.cmp-hist-detail { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: var(--c-text-soft); flex-wrap: wrap; }
+
 /* ========================= Contact / trash =============== */
 .contact-item { border-bottom: 1px solid var(--c-border); padding: 8px 0; }
 .contact-item summary { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .9rem; padding: 4px 0; list-style: none; }
@@ -949,6 +973,27 @@ details.card[open] > summary { margin-bottom: 10px; }
 .auth-btn { width: 100%; justify-content: center; padding: 11px; font-size: .95rem; }
 .auth-hint { color: var(--c-text-mute); font-size: .8rem; margin: 4px 0 0; line-height: 1.4; }
 
+/* ==================== Ajustes: secciones y filas ================== */
+.settings-section { display: flex; flex-direction: column; gap: 10px; }
+.settings-group {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.settings-group.danger-zone { border-color: var(--c-danger-soft); }
+.settings-row {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  cursor: pointer; border-bottom: 1px solid var(--c-border); transition: background .12s;
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row:hover { background: var(--c-surface-2); }
+.settings-row-ico { font-size: 1.2rem; width: 26px; text-align: center; flex-shrink: 0; line-height: 1; }
+.settings-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.settings-row-body strong { font-size: .92rem; font-weight: 620; }
+.settings-row-body span { font-size: .8rem; color: var(--c-text-mute); }
+.settings-row-chevron { font-size: 1.15rem; color: var(--c-text-mute); flex-shrink: 0; }
+.settings-row.is-danger .settings-row-body strong { color: var(--c-danger); }
+.settings-row.is-danger .settings-row-ico { color: var(--c-danger); }
+
 /* ==================== Ajustes: usuarios ========================== */
 .sidebar-user {
   margin-top: auto; padding: 12px 14px; border-top: 1px solid var(--c-border);
@@ -1176,6 +1221,20 @@ details.card[open] > summary { margin-bottom: 10px; }
     };
   }
 
+  // Consignación: precioDueno/cotizacionUSD llegan del formulario como texto
+  // (posiblemente con separador de miles, ej. "10.000") — hay que pasarlos
+  // por num() antes de guardarlos, igual que ya se hace con cualquier otro
+  // importe (precio de compra/venta, gastos, cuotas), para que finance.js
+  // los pueda usar como números reales.
+  function normalizeOrigin(o) {
+    if (!o) return { type: 'compra' };
+    if (o.type === 'consignacion') {
+      if (o.precioDueno != null && o.precioDueno !== '') o.precioDueno = num(o.precioDueno); else o.precioDueno = 0;
+      if (o.cotizacionUSD != null && o.cotizacionUSD !== '') o.cotizacionUSD = num(o.cotizacionUSD); else o.cotizacionUSD = null;
+    }
+    return o;
+  }
+
   function normalizeVehicle(v) {
     v.anio = toIntOrNull(v.anio);
     v.km = toIntOrNull(v.km);
@@ -1185,6 +1244,7 @@ details.card[open] > summary { margin-bottom: 10px; }
     v.estado = v.estado || 'stock';
     v.documentacion = v.documentacion || 'pendiente';
     v.observaciones = v.observaciones || '';
+    v.precioPretendido = (v.precioPretendido != null && v.precioPretendido !== '') ? num(v.precioPretendido) : null;
     if (!v.purchase) v.purchase = null;
     if (!v.sale) v.sale = null;
     if (typeof v.reservation === 'undefined') v.reservation = null;
@@ -1198,7 +1258,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         v.sale.financiacion.cuotas = Array.isArray(v.sale.financiacion.cuotas) ? v.sale.financiacion.cuotas : [];
       } else v.sale.financiacion = null;
     }
-    if (!v.origin) v.origin = { type: 'compra' };
+    v.origin = normalizeOrigin(v.origin);
     if (typeof v.deleted !== 'boolean') v.deleted = false;
     return v;
   }
@@ -1250,7 +1310,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       sale: null,
       reservation: null,
       expenses: [],
-      origin: data.origin || { type: 'compra' },
+      origin: normalizeOrigin(data.origin || { type: 'compra' }),
       deleted: false,
       deletedAt: null,
       createdAt: Date.now(),
@@ -1892,6 +1952,9 @@ details.card[open] > summary { margin-bottom: 10px; }
 
   function purchaseRate(v) {
     if (v.purchase && v.purchase.cotizacionUSD) return v.purchase.cotizacionUSD;
+    // consignación: no hay compra propia, pero puede tener su propia cotización
+    // de referencia (cargada al recibir el vehículo) para comparar en dólares.
+    if (v.origin && v.origin.type === 'consignacion' && v.origin.cotizacionUSD) return v.origin.cotizacionUSD;
     return currentRate();
   }
   function saleRate(v) {
@@ -1940,10 +2003,21 @@ details.card[open] > summary { margin-bottom: 10px; }
     if (vendido && v.sale.tradeIn) tradeInARS = toARS(v.sale.tradeIn.valor, v.sale.tradeIn.moneda, sRate);
     if (vendido && v.sale.diferencia) diferenciaARS = toARS(v.sale.diferencia.monto, v.sale.diferencia.moneda, sRate);
 
-    var gananciaARS = vendido ? (ventaARS - costoTotalARS) : 0;
-    var gananciaUSD = vendido ? (ventaUSD - costoTotalUSD) : 0;
-    var rentabilidad = (vendido && costoTotalARS) ? (gananciaARS / costoTotalARS) * 100 : 0;
-    var rentabilidadUSD = (vendido && costoTotalUSD) ? (gananciaUSD / costoTotalUSD) * 100 : 0;
+    // Consignación: el vehículo no se compró, sigue siendo del dueño. Al
+    // venderlo hay que descontar lo que le corresponde a él — la ganancia
+    // del negocio es solo la diferencia. Mientras está en stock esto NO
+    // se suma a costoTotalARS (así no infla el capital invertido: el
+    // negocio no puso ese dinero).
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    var precioDuenoARS = 0, precioDuenoUSD = 0;
+    if (esConsignacion && v.origin.precioDueno) {
+      precioDuenoARS = toARS(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', pRate);
+      precioDuenoUSD = toUSD(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', pRate);
+    }
+    var gananciaARS = vendido ? (ventaARS - costoTotalARS - precioDuenoARS) : 0;
+    var gananciaUSD = vendido ? (ventaUSD - costoTotalUSD - precioDuenoUSD) : 0;
+    var rentabilidad = (vendido && (costoTotalARS + precioDuenoARS)) ? (gananciaARS / (costoTotalARS + precioDuenoARS)) * 100 : 0;
+    var rentabilidadUSD = (vendido && (costoTotalUSD + precioDuenoUSD)) ? (gananciaUSD / (costoTotalUSD + precioDuenoUSD)) * 100 : 0;
 
     // Valor estimado en stock: precio pretendido, si existe; si no, la inversión total
     var estimadoARS = inversionARS;
@@ -2000,6 +2074,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       tradeInARS: tradeInARS, diferenciaARS: diferenciaARS,
       gananciaARS: gananciaARS, gananciaUSD: gananciaUSD,
       rentabilidad: rentabilidad, rentabilidadUSD: rentabilidadUSD,
+      esConsignacion: esConsignacion, precioDuenoARS: precioDuenoARS, precioDuenoUSD: precioDuenoUSD,
       estimadoARS: estimadoARS,
       diasEnStock: diasEnStock(v),
       purchaseRate: pRate, saleRate: sRate,
@@ -2024,8 +2099,10 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   function diasEnStock(v) {
-    if (!v.purchase || !v.purchase.fecha) return null;
-    var desde = parseDate(v.purchase.fecha);
+    // en consignación no hay fecha de compra: se cuenta desde que ingresó
+    var fechaDesde = v.purchase ? v.purchase.fecha : (v.origin && v.origin.type === 'consignacion' ? v.origin.fecha : null);
+    if (!fechaDesde) return null;
+    var desde = parseDate(fechaDesde);
     var hasta = (v.sale && v.sale.fecha) ? parseDate(v.sale.fecha) : new Date();
     if (!desde) return null;
     var ms = hasta - desde;
@@ -2045,16 +2122,22 @@ details.card[open] > summary { margin-bottom: 10px; }
   // dólares: cada parte se convierte con su propia cotización histórica
   // (la de la compra, o la del gasto si se cargó una distinta).
   function dollarComparison(v, dolarActualManual) {
-    if (!v.purchase) return null;
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    if (!v.purchase && !esConsignacion) return null;
     var m = vehicleMetrics(v);
-    var pRate = v.purchase.cotizacionUSD || null;
+    var pRate = esConsignacion ? (v.origin.cotizacionUSD || null) : (v.purchase.cotizacionUSD || null);
+    var monedaRef = esConsignacion ? (v.origin.monedaDueno || 'ARS') : v.purchase.moneda;
 
-    var compraARS = m.compraARS;
+    // En consignación no hubo compra propia: la referencia de "lo que costó"
+    // es lo que le corresponde al dueño (ver vehicleMetrics). m.compraARS/USD
+    // ya da 0 en ese caso, así que sumar precioDuenoARS/USD es exactamente
+    // reemplazarlo por el valor correcto sin duplicar nada.
+    var compraARS = m.compraARS + m.precioDuenoARS;
     var gastosARS = m.gastosARS;
-    var inversionARS = m.inversionARS;          // compra + gastos, en pesos (nominal)
-    var compraUSD = m.compraUSD;                // compra en USD (cotización de compra)
+    var inversionARS = compraARS + gastosARS;    // "compra" + gastos, en pesos (nominal)
+    var compraUSD = m.compraUSD + m.precioDuenoUSD;
     var gastosUSD = m.gastosUSD;                // gastos en USD (cotización de cada gasto)
-    var inversionUSD = m.inversionUSD;          // compra + gastos, en USD
+    var inversionUSD = compraUSD + gastosUSD;   // "compra" + gastos, en USD
     var valorUSD = inversionUSD;                // "valor equivalente en dólares" ahora incluye los gastos
     var dolarActual = +dolarActualManual || currentRate();
 
@@ -2065,12 +2148,13 @@ details.card[open] > summary { margin-bottom: 10px; }
       compraUSD: compraUSD,
       gastosUSD: gastosUSD,
       inversionUSD: inversionUSD,
-      dolarCompra: pRate || (v.purchase.moneda === 'USD' ? (v.purchase.cotizacionUSD || null) : currentRate()),
+      dolarCompra: pRate || (monedaRef === 'USD' ? pRate : currentRate()),
       valorUSD: valorUSD,
       dolarActual: dolarActual,
       valorActualizadoARS: valorUSD != null ? valorUSD * dolarActual : null,
       diferenciaARS: null,
-      resultado: null
+      resultado: null,
+      esConsignacion: esConsignacion
     };
     if (out.valorActualizadoARS != null) {
       out.diferenciaARS = out.valorActualizadoARS - inversionARS;
@@ -2565,9 +2649,57 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
   function money2(name, valueMonto, valueMoneda) {
     // grupo monto + moneda
-    var monto = input({ type: 'text', inputmode: 'decimal', name: name, value: valueMonto != null ? valueMonto : '', placeholder: '0', class: 'input money-input' });
+    var monto = moneyInput({ name: name, value: valueMonto != null ? valueMonto : '', placeholder: '0', class: 'input money-input' });
     var moneda = select([{ value: 'ARS', label: 'Pesos (ARS)' }, { value: 'USD', label: 'Dólares (USD)' }], valueMoneda || 'ARS', { name: name + 'Moneda', class: 'input select moneda-select' });
     return { wrap: el('div', { class: 'money-group' }, [monto, moneda]), monto: monto, moneda: moneda };
+  }
+
+  /* ------------------- Input numérico con separador de miles ---------- */
+  // Formatea en vivo mientras el usuario escribe (1000000 -> 1.000.000),
+  // acepta pegar, borrar y editar, y mantiene el cursor en una posición
+  // razonable. El valor mostrado es siempre compatible con store.num()
+  // (que ya interpreta correctamente "1.500.000,50"), así que ningún
+  // cálculo cambia: solo cambia cómo se ve mientras se escribe.
+  function numberToDisplay(n, allowNegative) {
+    if (n == null || n === '') return '';
+    n = +n;
+    if (isNaN(n)) return '';
+    var neg = n < 0 && allowNegative;
+    n = Math.abs(n);
+    var parts = String(n).split('.');
+    var intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var decPart = parts[1] ? parts[1].slice(0, 2) : null;
+    return (neg ? '-' : '') + intPart + (decPart ? ',' + decPart : '');
+  }
+  function formatTypedNumber(s, allowNegative) {
+    var neg = allowNegative && s.charAt(0) === '-';
+    s = s.replace(/[^0-9,]/g, '');
+    var ci = s.indexOf(',');
+    var intPart = ci >= 0 ? s.slice(0, ci) : s;
+    var decPart = ci >= 0 ? s.slice(ci + 1).replace(/,/g, '').slice(0, 2) : null;
+    intPart = intPart.replace(/^0+(?=\d)/, '');
+    var withDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var out = (neg ? '-' : '') + (withDots || (decPart != null ? '0' : ''));
+    if (decPart != null) out += ',' + decPart;
+    return out;
+  }
+  function moneyInput(attrs) {
+    attrs = Object.assign({}, attrs);
+    var allowNegative = !!attrs.allowNegative;
+    delete attrs.allowNegative;
+    var initVal = attrs.value;
+    attrs.value = (initVal != null && initVal !== '') ? numberToDisplay(initVal, allowNegative) : '';
+    var inp = input(Object.assign({ inputmode: 'decimal' }, attrs));
+    inp.addEventListener('input', function () {
+      var before = inp.value, caret = inp.selectionStart == null ? before.length : inp.selectionStart;
+      var digitsBeforeCaret = (before.slice(0, caret).match(/[0-9]/g) || []).length;
+      var formatted = formatTypedNumber(before, allowNegative);
+      if (formatted !== before) inp.value = formatted;
+      var pos = 0, seen = 0;
+      while (pos < formatted.length && seen < digitsBeforeCaret) { if (/[0-9]/.test(formatted[pos])) seen++; pos++; }
+      try { inp.setSelectionRange(pos, pos); } catch (e) {}
+    });
+    return inp;
   }
 
   /* ---------------- (Se quitó la carga de fotos) ------------------- */
@@ -2613,6 +2745,7 @@ details.card[open] > summary { margin-bottom: 10px; }
     el: el, clear: clear, qs: qs, qsa: qsa, appendChildren: appendChildren,
     toast: toast, modal: modal, confirm: confirm,
     field: field, input: input, textarea: textarea, select: select, money2: money2,
+    moneyInput: moneyInput,
     carIcon: carIcon,
     downloadFile: downloadFile, toCSV: toCSV,
     estadoBadge: estadoBadge, docBadge: docBadge, pill: pill, resultBadge: resultBadge,
@@ -4007,11 +4140,11 @@ details.card[open] > summary { margin-bottom: 10px; }
     var lblDone = cobro ? 'Cobrada' : 'Pagada';
     var cuotas = (opts.initial || []).map(function (c) { return Object.assign({}, c); });
     var box = el('div', { class: 'cuotas-builder' });
-    var fCant = ui.input({ inputmode: 'numeric', placeholder: 'Cuotas', style: 'max-width:100px' });
-    var fMonto = ui.input({ inputmode: 'decimal', placeholder: 'Monto c/u', style: 'max-width:150px' });
+    var fCant = ui.input({ inputmode: 'numeric', placeholder: 'Ej: 12', style: 'max-width:100px' });
+    var fMonto = ui.moneyInput({ placeholder: '0', style: 'max-width:150px' });
     var fPrimer = ui.input({ type: 'date', value: store.todayISO(), style: 'max-width:160px' });
     var gen = el('button', {
-      type: 'button', class: 'btn btn-sm btn-ghost', text: 'Generar cuotas', onclick: function () {
+      type: 'button', class: 'btn btn-primary btn-sm', text: 'Generar cuotas ›', onclick: function () {
         var n = parseInt(fCant.value, 10), monto = store.num(fMonto.value);
         if (!n || n < 1) { ui.toast('Poné cuántas cuotas', 'error'); return; }
         var base = App.finance.parseDate(fPrimer.value) || new Date();
@@ -4030,7 +4163,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       if (!cuotas.length) { box.appendChild(el('p', { class: 'form-help', text: 'Todavía no generaste cuotas. Poné la cantidad, el monto y desde cuándo, y tocá "Generar cuotas".' })); return; }
       var totalEl = el('div', { class: 'cuota-total' });
       cuotas.forEach(function (c, i) {
-        var fM = ui.input({ inputmode: 'decimal', value: c.monto, style: 'max-width:130px' });
+        var fM = ui.moneyInput({ value: c.monto, style: 'max-width:130px' });
         fM.addEventListener('input', function () { c.monto = fM.value; upd(); });
         var fV = ui.input({ type: 'date', value: c.vencimiento, style: 'max-width:150px' });
         fV.addEventListener('input', function () { c.vencimiento = fV.value; });
@@ -4056,7 +4189,15 @@ details.card[open] > summary { margin-bottom: 10px; }
     }
     render();
     return {
-      section: el('div', {}, [el('div', { class: 'inline-fields' }, [fCant, fMonto, fPrimer, gen]), box]),
+      section: el('div', {}, [
+        el('div', { class: 'inline-fields' }, [
+          ui.field('Cantidad de cuotas', fCant),
+          ui.field('Monto de cada una', fMonto),
+          ui.field('Primer vencimiento', fPrimer, 'Se generan mensuales, una por mes'),
+          gen
+        ]),
+        box
+      ]),
       render: render,
       getCuotas: function () { return cuotas.slice(); }
     };
@@ -4083,19 +4224,105 @@ details.card[open] > summary { margin-bottom: 10px; }
     };
   }
 
+  // --- Campos de "Compra" reutilizables entre registrar (nuevo) y editar
+  // (desde dentro de "Editar vehículo", para poder corregir el precio de
+  // compra sin ir a un formulario aparte). Reusa exactamente store.setPurchase.
+  function compraFieldsBuilder(p) {
+    p = p || {};
+    var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
+    var precio = ui.money2('vfCompra', p.precio || '', p.moneda || 'ARS');
+    var fForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], p.formaPago || 'transferencia');
+    var fTransf = ui.moneyInput({ value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]), mixtoError]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
+    var cuotas = cuotaBuilder(function () { return precio.moneda.value; }, { initial: p.cuotas });
+    var pr = p.proveedor || {};
+    var fProvNom = ui.input({ value: pr.nombre || '', placeholder: 'Nombre (opcional)' });
+    var fProvTel = ui.input({ value: pr.telefono || '', placeholder: 'Teléfono (opcional)' });
+    function sync() { mixtoBox.hidden = fForma.value !== 'mixto'; cuotas.section.hidden = fForma.value !== 'cuotas'; }
+    fForma.addEventListener('change', sync);
+    sync(); checkMixto();
+    var node = el('div', { class: 'form-grid' }, [
+      el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', fFecha)]),
+      ui.field('Forma de pago', fForma),
+      mixtoBox,
+      cuotas.section,
+      el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)])
+    ]);
+    return {
+      node: node,
+      hasPrice: function () { return store.num(precio.monto.value) > 0; },
+      isValid: checkMixto,
+      getData: function () {
+        return {
+          fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
+          formaPago: fForma.value, montoTransferencia: fTransf.value, montoEfectivo: fEfec.value,
+          cuotas: fForma.value === 'cuotas' ? cuotas.getCuotas() : [],
+          proveedor: { nombre: fProvNom.value, telefono: fProvTel.value, notas: pr.notas || '' }
+        };
+      }
+    };
+  }
+
+  // --- Campos de "Consignación": el vehículo sigue siendo del dueño; el
+  // negocio NO lo compra (no se llama a store.setPurchase). Lo que le
+  // corresponde al dueño se descuenta al vender (ver finance.js). ---
+  function consignacionFieldsBuilder(o) {
+    o = o || {};
+    var fDuenio = ui.input({ value: (o.duenio && o.duenio.nombre) || '', placeholder: 'Nombre del dueño' });
+    var fTelDuenio = ui.input({ value: (o.duenio && o.duenio.telefono) || '', placeholder: 'Teléfono (opcional)' });
+    var precioDueno = ui.money2('vfConsig', o.precioDueno || '', o.monedaDueno || 'ARS');
+    var fFecha = ui.input({ type: 'date', value: o.fecha || store.todayISO() });
+    var fCotiz = ui.moneyInput({ value: o.cotizacionUSD || '', placeholder: '1500' });
+    var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz, 'Sirve para comparar en dólares más adelante');
+    var fNotas = ui.textarea({ value: o.notas || '', rows: 2, placeholder: 'Condiciones, observaciones (opcional)' });
+    function sync() { cotizField.hidden = precioDueno.moneda.value !== 'ARS'; }
+    precioDueno.moneda.addEventListener('change', sync); sync();
+    var node = el('div', { class: 'form-grid' }, [
+      el('div', { class: 'grid-2' }, [ui.field('Dueño del vehículo', fDuenio), ui.field('Teléfono', fTelDuenio)]),
+      el('div', { class: 'grid-2' }, [ui.field('Precio que pide el dueño', precioDueno.wrap), ui.field('Fecha de ingreso', fFecha)]),
+      cotizField,
+      ui.field('Notas / condiciones', fNotas)
+    ]);
+    return {
+      node: node,
+      hasOwnerName: function () { return !!fDuenio.value.trim(); },
+      getData: function () {
+        return {
+          type: 'consignacion',
+          duenio: { nombre: fDuenio.value.trim(), telefono: fTelDuenio.value.trim() },
+          precioDueno: precioDueno.monto.value, monedaDueno: precioDueno.moneda.value,
+          cotizacionUSD: fCotiz.value, fecha: fFecha.value, notas: fNotas.value
+        };
+      }
+    };
+  }
+
   /* ===================== PÁGINA: REGISTRAR / EDITAR VEHÍCULO ============= */
   // Antes era un modal grande con scroll interno; ahora es una página completa
   // (misma app, solo mejor organizada). Sigue usando EXACTAMENTE las mismas
-  // funciones de guardado de siempre:
-  //   - store.createVehicle / store.updateVehicle para los datos del vehículo
-  //     (mismos campos, misma validación, mismo checklist).
-  //   - store.setPurchase (la misma función que usa "Editar compra" en la
-  //     ficha) si se completa la compra en el mismo paso al registrar.
-  // No se creó ninguna función de guardado nueva.
+  // funciones de guardado de siempre: store.createVehicle / store.updateVehicle
+  // para los datos del vehículo, y store.setPurchase para la compra (la misma
+  // que usa "Editar compra" en la ficha) — tanto al registrar como, ahora
+  // también, al editar un vehículo existente.
   function vehicleFormView(root, vehicleId) {
     var existing = vehicleId ? store.getVehicle(vehicleId) : null;
     var isEdit = !!existing;
     var v = existing || {};
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
 
     var fMarca = ui.input({ value: v.marca || '', required: true, placeholder: 'Toyota' });
     var fModelo = ui.input({ value: v.modelo || '', required: true, placeholder: 'Corolla' });
@@ -4110,48 +4337,44 @@ details.card[open] > summary { margin-bottom: 10px; }
     var pretendido = ui.money2('pretendido', v.precioPretendido || '', v.precioPretendidoMoneda || 'ARS');
     var fObs = ui.textarea({ value: v.observaciones || '', rows: 4, placeholder: 'Cualquier información relevante del vehículo...' });
 
-    var checkState = Object.assign({}, v.checklist || {});
-    var checkGrid = el('div', { class: 'check-grid' }, CHECKLIST_ITEMS.map(function (it) {
-      var cb = el('input', { type: 'checkbox' });
-      cb.checked = !!checkState[it[0]];
-      cb.addEventListener('change', function () { checkState[it[0]] = cb.checked; });
-      return el('label', { class: 'check-item' }, [cb, el('span', { text: it[1] })]);
-    }));
-
-    // --- Compra (opcional, solo al REGISTRAR un vehículo nuevo). Reutiliza
-    // los mismos componentes que "Editar compra" (cuotaBuilder, moneda,
-    // forma de pago). Para editar una compra ya cargada se sigue usando
-    // "Editar compra" desde la ficha, como siempre. ---
-    var precio, pFecha, pForma, pTransf, pEfec, pMixtoBox, pCuotas, pProvNom, pProvTel, compraCard;
+    // --- Origen: Compra o Consignación (solo al REGISTRAR un vehículo nuevo;
+    // no se puede cambiar el origen de un vehículo ya existente). ---
+    var origenCard, origenMode = 'compra', compraBuilder, consigBuilder;
     if (!isEdit) {
-      pFecha = ui.input({ type: 'date', value: store.todayISO() });
-      precio = ui.money2('compraPrecio', '', 'ARS');
-      pForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], 'transferencia');
-      pTransf = ui.input({ inputmode: 'decimal', placeholder: 'Monto transferencia' });
-      pEfec = ui.input({ inputmode: 'decimal', placeholder: 'Monto efectivo' });
-      pMixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', pTransf), ui.field('Monto en efectivo', pEfec)]);
-      pCuotas = cuotaBuilder(function () { return precio.moneda.value; }, {});
-      pProvNom = ui.input({ placeholder: 'Nombre (opcional)' });
-      pProvTel = ui.input({ placeholder: 'Teléfono (opcional)' });
+      compraBuilder = compraFieldsBuilder();
+      consigBuilder = consignacionFieldsBuilder();
+      var segCompra = el('button', { type: 'button', class: 'seg is-active', text: 'Compra' });
+      var segConsig = el('button', { type: 'button', class: 'seg', text: 'Consignación' });
+      function setOrigenMode(mode) {
+        origenMode = mode;
+        segCompra.classList.toggle('is-active', mode === 'compra');
+        segConsig.classList.toggle('is-active', mode === 'consignacion');
+        compraBuilder.node.hidden = mode !== 'compra';
+        consigBuilder.node.hidden = mode !== 'consignacion';
+      }
+      segCompra.addEventListener('click', function () { setOrigenMode('compra'); });
+      segConsig.addEventListener('click', function () { setOrigenMode('consignacion'); });
+      origenCard = el('div', { class: 'card' }, [
+        el('h3', { text: 'Origen del vehículo' }),
+        el('div', { class: 'seg-control' }, [segCompra, segConsig]),
+        el('p', { class: 'form-help', text: 'Compra: opcional, la podés cargar después. Consignación: el dueño lo entrega para que lo vendas vos — el negocio no lo compra, solo se queda con la diferencia al venderlo.' }),
+        compraBuilder.node, consigBuilder.node
+      ]);
+      setOrigenMode('compra');
+    }
 
-      var syncPForma = function () {
-        var f = pForma.value;
-        pMixtoBox.hidden = f !== 'mixto';
-        pCuotas.section.hidden = f !== 'cuotas';
-      };
-      pForma.addEventListener('change', syncPForma);
-      syncPForma();
-
-      compraCard = el('div', { class: 'card' }, [
+    // --- Edición: permite corregir la compra (o los datos de consignación)
+    // de un vehículo ya existente, sin ir a un formulario aparte. ---
+    var editCompraBuilder = null, editConsigBuilder = null, editOrigenCard = null;
+    if (isEdit && esConsignacion) {
+      editConsigBuilder = consignacionFieldsBuilder(v.origin);
+      editOrigenCard = el('div', { class: 'card' }, [el('h3', { text: '🤝 Consignación' }), editConsigBuilder.node]);
+    } else if (isEdit && v.purchase) {
+      editCompraBuilder = compraFieldsBuilder(v.purchase);
+      editOrigenCard = el('div', { class: 'card' }, [
         el('h3', { text: 'Compra' }),
-        el('p', { class: 'form-help', text: 'Opcional: si todavía no la tenés, la podés cargar después desde la ficha ("Registrar compra").' }),
-        el('div', { class: 'form-grid' }, [
-          el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', pFecha)]),
-          ui.field('Forma de pago', pForma),
-          pMixtoBox,
-          pCuotas.section,
-          el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', pProvNom), ui.field('Teléfono', pProvTel)])
-        ])
+        el('p', { class: 'form-help', text: 'Corregí el precio u otros datos de la compra. La inversión, la ganancia y toda la economía se recalculan solas.' }),
+        editCompraBuilder.node
       ]);
     }
 
@@ -4169,7 +4392,8 @@ details.card[open] > summary { margin-bottom: 10px; }
         ])
       ]),
 
-      compraCard,
+      origenCard,
+      editOrigenCard,
 
       el('div', { class: 'card' }, [
         el('h3', { text: 'Estado' }),
@@ -4182,12 +4406,6 @@ details.card[open] > summary { margin-bottom: 10px; }
         ui.field('Observaciones', fObs)
       ]),
 
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Checklist' }),
-        el('p', { class: 'form-help', text: 'Revisión del vehículo (opcional)' }),
-        checkGrid
-      ]),
-
       el('div', { class: 'form-actions' }, [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { App.router.go(isEdit ? 'vehiculo/' + v.id : ''); } }),
         el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar cambios' : 'Registrar vehículo', onclick: submit })
@@ -4198,31 +4416,30 @@ details.card[open] > summary { margin-bottom: 10px; }
     function submit() {
       if (submitted) return;
       if (!fMarca.value.trim() || !fModelo.value.trim()) { ui.toast('Marca y modelo son obligatorios', 'error'); return; }
+      if (!isEdit && origenMode === 'compra' && compraBuilder.hasPrice() && !compraBuilder.isValid()) { ui.toast('Los importes de la compra no coinciden con el total', 'error'); return; }
+      if (!isEdit && origenMode === 'consignacion' && !consigBuilder.hasOwnerName()) { ui.toast('Ingresá el nombre del dueño', 'error'); return; }
+      if (editCompraBuilder && editCompraBuilder.hasPrice() && !editCompraBuilder.isValid()) { ui.toast('Los importes de la compra no coinciden con el total', 'error'); return; }
       submitted = true;
       var data = {
         marca: fMarca.value, modelo: fModelo.value, anio: fAnio.value, patente: fPatente.value,
         km: fKm.value, combustible: fComb.value, caja: fCaja.value, version: fVersion.value,
         estado: fEstado.value, documentacion: fDoc.value,
         precioPretendido: pretendido.monto.value, precioPretendidoMoneda: pretendido.moneda.value,
-        observaciones: fObs.value, checklist: checkState
+        observaciones: fObs.value
       };
+      if (!isEdit && origenMode === 'consignacion') data.origin = consigBuilder.getData();
+      if (isEdit && editConsigBuilder) data.origin = editConsigBuilder.getData();
+
       if (isEdit) {
         store.updateVehicle(v.id, data);
+        if (editCompraBuilder && editCompraBuilder.hasPrice()) store.setPurchase(v.id, editCompraBuilder.getData());
         ui.toast('Vehículo actualizado', 'success');
         App.router.go('vehiculo/' + v.id);
         return;
       }
       var nv = store.createVehicle(data);
-      if (precio && store.num(precio.monto.value) > 0) {
-        store.setPurchase(nv.id, {
-          fecha: pFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
-          formaPago: pForma.value,
-          montoTransferencia: pTransf.value, montoEfectivo: pEfec.value,
-          cuotas: pForma.value === 'cuotas' ? pCuotas.getCuotas() : [],
-          proveedor: { nombre: pProvNom.value, telefono: pProvTel.value, notas: '' }
-        });
-      }
-      ui.toast('Vehículo registrado', 'success');
+      if (origenMode === 'compra' && compraBuilder.hasPrice()) store.setPurchase(nv.id, compraBuilder.getData());
+      ui.toast(origenMode === 'consignacion' ? 'Consignación registrada' : 'Vehículo registrado', 'success');
       App.router.go('vehiculo/' + nv.id);
     }
 
@@ -4237,13 +4454,29 @@ details.card[open] > summary { margin-bottom: 10px; }
 
     var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
     var precio = ui.money2('precio', p.precio || '', p.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: p.cotizacionUSD || '', placeholder: '1500' });
+    var fCotiz = ui.moneyInput({ value: p.cotizacionUSD || '', placeholder: '1500' });
     var cotizField = ui.field('Cotización del dólar al momento de la compra', fCotiz, 'Se guarda como valor histórico y no cambia luego');
 
     var fForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], p.formaPago || 'transferencia');
-    var fTransf = ui.input({ inputmode: 'decimal', value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
-    var fEfec = ui.input({ inputmode: 'decimal', value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
-    var mixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]);
+    var fTransf = ui.moneyInput({ value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [
+      el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]),
+      mixtoError
+    ]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
 
     var cb = cuotaBuilder(function () { return precio.moneda.value; }, { initial: p.cuotas });
     var cuotasSection = cb.section;
@@ -4289,7 +4522,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         el('button', { class: 'btn btn-primary', text: 'Guardar compra', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz();
+    syncForma(); syncCotiz(); checkMixto();
 
     var submitted = false;
     function submit() {
@@ -4298,6 +4531,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) {
         ui.toast('Ingresá la cotización del dólar de la compra', 'error'); return;
       }
+      if (!checkMixto()) { ui.toast('Los importes no coinciden con el total', 'error'); return; }
       submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
@@ -4319,12 +4553,13 @@ details.card[open] > summary { margin-bottom: 10px; }
   function saleForm(vehicleId) {
     var v = store.getVehicle(vehicleId);
     if (!v) return;
-    if (!v.purchase) { ui.toast('Primero registrá la compra del vehículo', 'error'); return; }
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    if (!v.purchase && !esConsignacion) { ui.toast('Primero registrá la compra del vehículo', 'error'); return; }
     var s = v.sale || {};
 
     var fFecha = ui.input({ type: 'date', value: s.fecha || store.todayISO() });
     var precio = ui.money2('venta', s.precio || '', s.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: s.cotizacionUSD || '', placeholder: '1600' });
+    var fCotiz = ui.moneyInput({ value: s.cotizacionUSD || '', placeholder: '1600' });
     var cotizField = ui.field('Cotización del dólar al momento de la venta', fCotiz, 'Valor histórico, no cambia luego');
     var fForma = ui.select([
       opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'),
@@ -4332,9 +4567,25 @@ details.card[open] > summary { margin-bottom: 10px; }
       opt('financiado', 'Financiado / con prenda (en cuotas)'),
       opt('vehiculo', 'Entrega de otro vehículo como parte de pago')
     ], s.formaCobro || 'transferencia');
-    var fTransf = ui.input({ inputmode: 'decimal', value: s.montoTransferencia || '', placeholder: 'Monto transferencia' });
-    var fEfec = ui.input({ inputmode: 'decimal', value: s.montoEfectivo || '', placeholder: 'Monto efectivo' });
-    var mixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]);
+    var fTransf = ui.moneyInput({ value: s.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: s.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [
+      el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]),
+      mixtoError
+    ]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
 
     // financiación (cuotas a cobrar)
     var f = s.financiacion || {};
@@ -4406,12 +4657,15 @@ details.card[open] > summary { margin-bottom: 10px; }
       var m = App.finance.vehicleMetrics(v);
       var sRate = store.num(fCotiz.value) || App.finance.currentRate();
       var ventaARS = precio.moneda.value === 'USD' ? store.num(precio.monto.value) * sRate : store.num(precio.monto.value);
-      var costo = m.inversionARS + m.comisionCompraARS + (store.num(comision.get() && comision.get().monto) || 0);
+      // en consignación no "compramos" el auto: lo que hay que descontar de la
+      // venta es lo que le corresponde al dueño, no un costo de compra propio.
+      var precioDuenoARS = esConsignacion && v.origin.precioDueno ? App.finance.toARS(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', sRate) : 0;
+      var costo = m.inversionARS + m.comisionCompraARS + precioDuenoARS + (store.num(comision.get() && comision.get().monto) || 0);
       var gan = ventaARS - costo;
       var rent = costo ? gan / costo * 100 : 0;
       ui.clear(preview);
       preview.appendChild(el('div', { class: 'sale-preview-row' }, [
-        el('span', { text: 'Lo que pusiste (compra + gastos + comisión)' }), el('strong', { text: App.fmt.money(costo) })
+        el('span', { text: esConsignacion ? 'Le corresponde al dueño + gastos + comisión' : 'Lo que pusiste (compra + gastos + comisión)' }), el('strong', { text: App.fmt.money(costo) })
       ]));
       preview.appendChild(el('div', { class: 'sale-preview-row' }, [
         el('span', { text: 'Ganancia estimada' }),
@@ -4446,13 +4700,14 @@ details.card[open] > summary { margin-bottom: 10px; }
         el('button', { class: 'btn btn-primary', text: 'Guardar venta', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz(); updatePreview();
+    syncForma(); syncCotiz(); updatePreview(); checkMixto();
 
     var submitted = false;
     function submit() {
       if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de venta', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) { ui.toast('Ingresá la cotización del dólar de la venta', 'error'); return; }
+      if (!checkMixto()) { ui.toast('Los importes no coinciden con el total', 'error'); return; }
       var tradeIn = null;
       if (tiEnabled.checked && !ti.vehicleId) {
         if (!tiMarca.value.trim() || !tiModelo.value.trim()) { ui.toast('Completá marca y modelo del vehículo recibido', 'error'); return; }
@@ -4550,7 +4805,7 @@ details.card[open] > summary { margin-bottom: 10px; }
     var e = expense || {};
     var monto = ui.money2('gasto', e.monto || '', e.moneda || 'ARS');
     var fFecha = ui.input({ type: 'date', value: e.fecha || store.todayISO() });
-    var fCotiz = ui.input({ inputmode: 'decimal', value: e.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
+    var fCotiz = ui.moneyInput({ value: e.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz, 'Si el gasto es en dólares y querés fijar una cotización distinta a la de la compra');
     var fObs = ui.textarea({ value: e.observacion || '', rows: 3, placeholder: 'Ej: 200 lucas en el vidrio delantero y cambio de aceite.' });
     function syncCotiz() { cotizField.hidden = monto.moneda.value !== 'USD'; }
@@ -4601,7 +4856,7 @@ details.card[open] > summary { margin-bottom: 10px; }
     var fConcepto = ui.input({ value: f.concepto || '', required: true, placeholder: 'Ej: Alquiler del local' });
     var fCat = ui.select(GASTO_CATS.map(function (c) { return opt(c[0], c[1]); }), f.categoria || 'otro');
     var monto = ui.money2('fijo', f.monto || '', f.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
+    var fCotiz = ui.moneyInput({ value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz);
     var fFrec = ui.select([opt('mensual', 'Todos los meses'), opt('unica', 'Una sola vez')], f.frecuencia || 'mensual');
     var fFecha = ui.input({ type: 'date', value: f.fecha || store.todayISO() });
@@ -4687,11 +4942,26 @@ details.card[open] > summary { margin-bottom: 10px; }
     var fRepeat = ui.select(REM_REPEAT.map(function (t) { return opt(t[0], t[1]); }), r.repeat || 'none');
     var fNota = ui.textarea({ value: r.nota || '', rows: 3, placeholder: 'Detalle o nota (opcional)' });
 
+    // Solo título y fecha son realmente necesarios para crear una alerta en
+    // segundos; el resto (hora, tipo, repetir, nota) queda opcional detrás
+    // de "Más opciones" — mismos campos y lógica de siempre, nada eliminado.
+    var extra = el('div', { class: 'form-grid', hidden: true }, [
+      el('div', { class: 'grid-2' }, [ui.field('Hora (opcional)', fHora), ui.field('Tipo', fTipo)]),
+      ui.field('Repetir', fRepeat),
+      ui.field('Descripción / nota (opcional)', fNota)
+    ]);
+    var hayOpcionalesCargados = !!(r.hora || (r.tipo && r.tipo !== 'tarea') || (r.repeat && r.repeat !== 'none') || r.nota);
+    extra.hidden = !hayOpcionalesCargados;
+    var toggleExtra = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: extra.hidden ? '＋ Más opciones' : '－ Menos opciones', onclick: function () {
+      extra.hidden = !extra.hidden;
+      toggleExtra.textContent = extra.hidden ? '＋ Más opciones' : '－ Menos opciones';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       ui.field('Título *', fTitulo),
-      el('div', { class: 'grid-2' }, [ui.field('Fecha *', fFecha), ui.field('Hora (opcional)', fHora)]),
-      el('div', { class: 'grid-2' }, [ui.field('Tipo', fTipo), ui.field('Repetir', fRepeat)]),
-      ui.field('Descripción / nota (opcional)', fNota)
+      ui.field('Fecha *', fFecha),
+      toggleExtra,
+      extra
     ]);
 
     var footer = [
@@ -4948,7 +5218,8 @@ details.card[open] > summary { margin-bottom: 10px; }
       el('div', { class: 'row-main' }, [
         el('div', { class: 'row-title-line' }, [
           el('span', { class: 'row-name', text: store.vehicleName(v) }),
-          ui.estadoBadge(v.estado)
+          ui.estadoBadge(v.estado),
+          (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consignación', 'pill-warn') : null
         ]),
         el('div', { class: 'row-meta' }, [
           v.version ? el('span', { text: v.version }) : null,
@@ -4971,10 +5242,10 @@ details.card[open] > summary { margin-bottom: 10px; }
     var fAnio = ui.input({ value: filters.anio, inputmode: 'numeric', placeholder: 'Año' });
     var fEstado = ui.select([{ value: '', label: 'Todos' }, { value: 'stock', label: 'En stock' }, { value: 'reservado', label: 'Reservado' }, { value: 'vendido', label: 'Vendido' }], filters.estado);
     var fVendido = ui.select([{ value: '', label: 'Todos' }, { value: 'si', label: 'Vendidos' }, { value: 'no', label: 'No vendidos' }], filters.vendido);
-    var fPMin = ui.input({ value: filters.precioMin, inputmode: 'decimal', placeholder: 'Mín' });
-    var fPMax = ui.input({ value: filters.precioMax, inputmode: 'decimal', placeholder: 'Máx' });
-    var fGMin = ui.input({ value: filters.gananciaMin, inputmode: 'decimal', placeholder: 'Mín' });
-    var fGMax = ui.input({ value: filters.gananciaMax, inputmode: 'decimal', placeholder: 'Máx' });
+    var fPMin = ui.moneyInput({ value: filters.precioMin, placeholder: 'Mín' });
+    var fPMax = ui.moneyInput({ value: filters.precioMax, placeholder: 'Máx' });
+    var fGMin = ui.moneyInput({ value: filters.gananciaMin, placeholder: 'Mín', allowNegative: true });
+    var fGMax = ui.moneyInput({ value: filters.gananciaMax, placeholder: 'Máx', allowNegative: true });
     var fCD = ui.input({ value: filters.compraDesde, type: 'date' });
     var fCH = ui.input({ value: filters.compraHasta, type: 'date' });
     var fVD = ui.input({ value: filters.ventaDesde, type: 'date' });
@@ -5030,13 +5301,14 @@ details.card[open] > summary { margin-bottom: 10px; }
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
     var m = fin.vehicleMetrics(v);
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
     var wrap = el('div', { class: 'page vehicle-detail' });
 
-    // acción principal: registrar compra (si falta) o registrar venta (si ya
-    // se puede vender); "Agregar gasto" siempre visible. El resto de las
-    // acciones (antes todas sueltas acá arriba) quedan en el menú "⋯".
+    // acción principal: registrar compra (si falta y no es consignación) o
+    // registrar venta (si ya se puede vender); "Agregar gasto" siempre
+    // visible. El resto de las acciones quedan en el menú "⋯".
     var primaryActions = [];
-    if (!v.purchase) {
+    if (!v.purchase && !esConsignacion) {
       primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }));
     } else if (v.estado !== 'vendido') {
       primaryActions.push(el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }));
@@ -5063,7 +5335,8 @@ details.card[open] > summary { margin-bottom: 10px; }
           el('div', { class: 'detail-patente', text: v.patente || 'Sin patente' }),
           el('div', { class: 'detail-sub' }, [
             ui.estadoBadge(v.estado), ui.docBadge(v.documentacion),
-            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null
+            v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null,
+            esConsignacion ? ui.pill('🤝 Consignación', 'pill-warn') : null
           ])
         ])
       ]),
@@ -5096,11 +5369,10 @@ details.card[open] > summary { margin-bottom: 10px; }
       })));
     }
 
-    // tabs — reducidas a 4 secciones conceptuales. No se perdió ninguna
-    // funcionalidad: Compra + Gastos + Venta + Rentabilidad ahora viven
-    // juntas dentro de "Economía" (mismas funciones tabCompra/tabGastos/
-    // tabVenta/tabRentabilidad, solo concatenadas); Documentación + Checklist
-    // viven juntas dentro de "Documentación" (mismas tabDocs/tabChecklist).
+    // tabs — reducidas a 4 secciones conceptuales: Compra + Gastos + Venta +
+    // Rentabilidad viven juntas dentro de "Economía" (mismas funciones
+    // tabCompra/tabGastos/tabVenta/tabRentabilidad, solo concatenadas);
+    // "Documentación" muestra tabDocs (el Checklist se eliminó de la app).
     // Observaciones se movió a Resumen (ver tabResumen) y ya no es pestaña propia.
     var tabsWrap = el('div', { class: 'tabs' });
     var panel = el('div', { class: 'tab-panel' });
@@ -5171,18 +5443,50 @@ details.card[open] > summary { margin-bottom: 10px; }
     ]);
   }
 
+  // Tarjeta "Consignación": el vehículo sigue siendo del dueño, el negocio
+  // no lo compró. Reutiliza vehicleMetrics tal cual (gananciaARS ya
+  // descuenta lo que le corresponde al dueño — ver finance.js) y solo
+  // agrega, para mostrar, cuánto es ese importe del dueño.
+  function consignacionCard(v, m) {
+    var o = v.origin;
+    var duenoStr = (o.duenio && o.duenio.nombre) ? o.duenio.nombre + (o.duenio.telefono ? ' · ' + o.duenio.telefono : '') : '—';
+    var precioDuenoARS = m.precioDuenoARS;
+    var rows = [
+      ['Dueño', duenoStr],
+      ['Precio que pide el dueño', o.precioDueno ? fmt.money(o.precioDueno, o.monedaDueno) : '—'],
+      ['Fecha de ingreso', o.fecha ? fmt.date(o.fecha) : '—'],
+      o.notas ? ['Notas', o.notas] : null
+    ];
+    if (m.vendido) {
+      rows.push(['Vendido en', fmt.money(m.ventaARS)]);
+      rows.push(['Le corresponde al dueño', fmt.money(precioDuenoARS)]);
+      rows.push(['Ganancia del negocio', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong']);
+    } else {
+      rows.push(['Le corresponde al dueño al vender', fmt.money(precioDuenoARS)]);
+      if (v.precioPretendido) {
+        var margen = m.estimadoARS - precioDuenoARS - m.costoTotalARS;
+        rows.push(['Margen estimado del negocio', (margen >= 0 ? '+' : '') + fmt.money(margen), margen >= 0 ? 'pos strong' : 'neg strong']);
+      }
+    }
+    return el('div', { class: 'card info-card' }, [
+      el('h4', { text: '🤝 Consignación' }),
+      dl(rows)
+    ]);
+  }
+
   // Resumen: para entenderse en pocos segundos. Junta, en modo lectura, lo
   // esencial de cada sección (los mismos datos y cálculos de siempre — nada
   // se recalcula acá; el detalle interactivo completo sigue en Economía /
   // Documentación).
   function tabResumen(v, m) {
+    var esConsig = v.origin && v.origin.type === 'consignacion';
     var out = [];
     out.push(el('div', { class: 'grid-2' }, [
       el('div', { class: 'card' }, [el('h4', { text: 'Economía' }), dl([
-        ['Compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
+        esConsig ? null : ['Compra', v.purchase ? fmt.money(v.purchase.precio, v.purchase.moneda) : '—'],
         ['Gastos', fmt.money(m.gastosARS)],
         m.comisionARS ? ['Comisiones', fmt.money(m.comisionARS)] : null,
-        ['Inversión total', fmt.money(m.costoTotalARS), 'strong'],
+        esConsig ? null : ['Inversión total', fmt.money(m.costoTotalARS), 'strong'],
         ['Precio de venta', m.vendido ? fmt.money(v.sale.precio, v.sale.moneda) : 'Todavía no vendido'],
         m.vendido ? ['Ganancia', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong'] : null,
         m.vendido ? ['Rentabilidad', fmt.pct(m.rentabilidad), m.gananciaARS >= 0 ? 'pos' : 'neg'] : null,
@@ -5202,30 +5506,12 @@ details.card[open] > summary { margin-bottom: 10px; }
     if (v.origin && v.origin.type === 'parte-de-pago') {
       out.push(origenCard(v, m));
     }
-    out.push(el('div', { class: 'grid-2' }, [
-      el('div', { class: 'card' }, [el('h4', { text: 'Documentación' }), ui.docBadge(v.documentacion)]),
-      el('div', { class: 'card' }, [
-        el('h4', { text: 'Checklist' }),
-        checklistGlance(v)
-      ])
-    ]));
+    if (esConsig) {
+      out.push(consignacionCard(v, m));
+    }
+    out.push(el('div', { class: 'card' }, [el('h4', { text: 'Documentación' }), ui.docBadge(v.documentacion)]));
     if (v.observaciones) out.push(el('div', { class: 'card' }, [el('h4', { text: 'Observaciones' }), el('p', { class: 'obs-text', text: v.observaciones })]));
     return out;
-  }
-
-  // Vista rápida (solo lectura) del checklist — el detalle interactivo
-  // (tildar/destildar) sigue en la pestaña Documentación (tabChecklist).
-  function checklistGlance(v) {
-    var items = App.forms.CHECKLIST_ITEMS;
-    var done = items.filter(function (it) { return v.checklist && v.checklist[it[0]]; }).length;
-    if (!done) return el('p', { class: 'form-help', text: 'Todavía no marcaste nada del checklist.' });
-    return el('div', {}, [
-      el('p', { class: 'form-help', text: done + ' / ' + items.length + ' completado' }),
-      el('div', { class: 'checklist-glance' }, items.map(function (it) {
-        var ok = !!(v.checklist && v.checklist[it[0]]);
-        return el('span', { class: 'checklist-glance-item' + (ok ? ' is-ok' : '') }, [el('span', { text: ok ? '✓' : '○' }), el('span', { text: it[1] })]);
-      }))
-    ]);
   }
 
   // "Economía" — junta, tal cual, Compra + Gastos + Venta + Rentabilidad
@@ -5234,13 +5520,13 @@ details.card[open] > summary { margin-bottom: 10px; }
     return [].concat(tabCompra(v, m), tabGastos(v, m), tabVenta(v, m), tabRentabilidad(v, m));
   }
 
-  // "Documentación" — junta, tal cual, Documentación + Checklist (mismas
-  // funciones interactivas que ya existían).
+  // "Documentación" (la pestaña ya no incluye Checklist, se eliminó).
   function tabDocumentacion(v) {
-    return [].concat(tabDocs(v), tabChecklist(v));
+    return tabDocs(v);
   }
 
   function tabCompra(v, m) {
+    if (v.origin && v.origin.type === 'consignacion') return [consignacionCard(v, m)];
     if (!v.purchase) return [ui.emptyState('Todavía no registraste la compra de este vehículo.', '🧾'), el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }))];
     var p = v.purchase;
     var out = [el('div', { class: 'card-actions-head' }, [el('h4', { text: 'Compra' }), el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar compra', onclick: function () { App.forms.purchaseForm(v.id); } })])];
@@ -5342,7 +5628,7 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   function tabVenta(v, m) {
-    if (!v.purchase) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', '🧾')];
+    if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', '🧾')];
     if (!v.sale) return [
       ui.emptyState('Este vehículo todavía no fue vendido.', '🏷️'),
       el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }))
@@ -5458,23 +5744,6 @@ details.card[open] > summary { margin-bottom: 10px; }
       el('h4', { text: 'Estado de la documentación' }),
       el('div', { class: 'doc-options' }, opts.map(function (o) {
         return el('button', { class: 'doc-opt' + (v.documentacion === o[0] ? ' is-active' : ''), text: o[1], onclick: function () { store.updateVehicle(v.id, { documentacion: o[0] }); ui.toast('Documentación actualizada'); App.router.render(); } });
-      }))
-    ])];
-  }
-
-  function tabChecklist(v) {
-    var items = App.forms.CHECKLIST_ITEMS;
-    var done = items.filter(function (it) { return v.checklist && v.checklist[it[0]]; }).length;
-    return [el('div', { class: 'card' }, [
-      el('div', { class: 'card-actions-head' }, [el('h4', { text: 'Checklist de preparación' }), el('span', { class: 'count-tag', text: done + ' / ' + items.length })]),
-      el('div', { class: 'check-grid' }, items.map(function (it) {
-        var cb = el('input', { type: 'checkbox' });
-        cb.checked = !!(v.checklist && v.checklist[it[0]]);
-        cb.addEventListener('change', function () {
-          var cl = Object.assign({}, v.checklist); cl[it[0]] = cb.checked;
-          store.updateVehicle(v.id, { checklist: cl }, { silent: true });
-        });
-        return el('label', { class: 'check-item' }, [cb, el('span', { text: it[1] })]);
       }))
     ])];
   }
@@ -5656,7 +5925,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       var m = fin.vehicleMetrics(v);
       var hoy = store.todayISO();
       var s = store.getState().settings;
-      if (!v.purchase) out.push({ level: 'warn', icon: '🧾', text: 'Falta registrar la compra', vehicleId: v.id });
+      if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) out.push({ level: 'warn', icon: '🧾', text: 'Falta registrar la compra', vehicleId: v.id });
       if (v.purchase && !v.purchase.cotizacionUSD && v.purchase.moneda === 'ARS') out.push({ level: 'info', icon: '💵', text: 'Falta la cotización del dólar en la compra', vehicleId: v.id });
       if (v.estado === 'vendido' && v.sale) {
         if (!v.sale.precio) out.push({ level: 'warn', icon: '🏷️', text: 'Falta registrar el precio de venta', vehicleId: v.id });
@@ -5712,8 +5981,8 @@ details.card[open] > summary { margin-bottom: 10px; }
 
     var wrap = el('div', { class: 'page alertas-page' });
 
-    var head = pageHead('Alertas', 'Cuotas, recordatorios y situaciones de los vehículos');
-    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nuevo recordatorio', onclick: function () { App.forms.reminderForm(null, remCal.sel); } }));
+    var head = pageHead('Alertas', 'Qué tenés pendiente, vencido y para hoy');
+    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nueva alerta', onclick: function () { App.forms.reminderForm(null, remCal.sel); } }));
     wrap.appendChild(head);
 
     // Resumen (chips)
@@ -5908,52 +6177,59 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   /* ============================== ECONOMÍA ============================ */
-  // Agrupa, en pestañas, las secciones que antes eran páginas propias del
-  // menú (Situación económica = ex "Finanzas", Gastos del negocio, Cuotas
-  // y cobros, Comparación dólar). Cada pestaña reutiliza tal cual la vista
-  // que ya existía (misma función, mismos datos, misma lógica) — acá solo
-  // se decide en qué contenedor se dibuja. "Resúmenes" es una página aparte
-  // (misma info, otra forma de mirarla) a la que se llega con el botón de
-  // arriba a la derecha, sin duplicar ningún cálculo.
-  var economiaTab = 'situacion';
+  // Pantalla principal: menú de módulos en tarjetas (mismo patrón de estado
+  // interno + volverLink ya usado en Resúmenes/Cuotas/Ajustes, sin rutas
+  // nuevas). Cada módulo reutiliza tal cual la vista que ya existía (misma
+  // función, mismos datos, misma lógica) — acá solo se decide en qué
+  // contenedor se dibuja.
+  var MODULOS_ECONOMIA = [
+    ['situacion', '💰', 'Situación económica', 'Resultado, capital y stock del negocio', finanzasView],
+    ['gastos', '🏢', 'Gastos del negocio', 'Alquiler, sueldos y otros gastos fijos', gastosNegocioView],
+    ['cuotas', '💳', 'Cuotas y cobros', 'Lo que pagás y lo que te pagan', cuotasView],
+    ['dolar', '💵', 'Comparar dólar', 'El valor de tus operaciones en dólares', function (panel) { comparacionView(panel); }],
+    ['resumenes', '📊', 'Resúmenes', 'Totales por período y estadísticas', resumenesView]
+  ];
+  var economiaScreen = 'home';
   function economiaView(root) {
     var wrap = el('div', { class: 'page page-economia' });
     wrap.appendChild(el('div', { class: 'page-head' }, [
       el('div', {}, [
         el('h1', { text: 'Economía' }),
-        el('p', { class: 'page-sub', text: 'Situación económica, gastos del negocio, cuotas, comparación del dólar y resúmenes' })
+        el('p', { class: 'page-sub', text: 'Elegí qué querés ver' })
       ])
     ]));
 
-    var TABS = [
-      ['situacion', 'Situación económica', finanzasView],
-      ['gastos', 'Gastos del negocio', gastosNegocioView],
-      ['cuotas', 'Cuotas y cobros', cuotasView],
-      ['dolar', 'Comparación dólar', function (panel) { comparacionView(panel); }],
-      ['resumenes', 'Resúmenes', resumenesView]
-    ];
-    var tabsWrap = el('div', { class: 'tabs' });
-    var panel = el('div', { class: 'tab-panel' });
-
-    function renderTab(key) {
-      ui.clear(panel);
-      var t = TABS.filter(function (x) { return x[0] === key; })[0] || TABS[0];
-      t[2](panel);
-    }
-    TABS.forEach(function (t) {
-      var b = el('button', { class: 'tab' + (t[0] === economiaTab ? ' is-active' : ''), text: t[1], onclick: function () {
-        economiaTab = t[0];
-        ui.qsa('.tab', tabsWrap).forEach(function (x) { x.classList.remove('is-active'); });
-        b.classList.add('is-active');
-        renderTab(t[0]);
-      } });
-      tabsWrap.appendChild(b);
-    });
-
-    wrap.appendChild(tabsWrap);
-    wrap.appendChild(panel);
-    renderTab(economiaTab);
+    // class "tab-panel": la regla CSS que le da a Economía su ancho amplio
+    // (.page-economia .tab-panel .page) sigue aplicando igual que antes.
+    var content = el('div', { class: 'tab-panel' });
+    wrap.appendChild(content);
     root.appendChild(wrap);
+
+    function goScreen(key) { economiaScreen = key; render(); }
+    function volverLink() {
+      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Economía', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
+    }
+
+    function render() {
+      ui.clear(content);
+      var mod = MODULOS_ECONOMIA.filter(function (m) { return m[0] === economiaScreen; })[0];
+      if (mod) {
+        content.appendChild(volverLink());
+        var panel = el('div', { style: 'margin-top:6px' });
+        content.appendChild(panel);
+        mod[4](panel);
+        return;
+      }
+      economiaScreen = 'home';
+      content.appendChild(el('div', { class: 'grid-2 module-grid' }, MODULOS_ECONOMIA.map(function (m) {
+        return el('div', { class: 'card module-card', onclick: function () { goScreen(m[0]); } }, [
+          el('span', { class: 'module-card-ico', text: m[1] }),
+          el('strong', { class: 'module-card-title', text: m[2] }),
+          el('span', { class: 'module-card-desc', text: m[3] })
+        ]);
+      })));
+    }
+    render();
   }
 
   /* =============================== FINANZAS =========================== */
@@ -5999,7 +6275,10 @@ details.card[open] > summary { margin-bottom: 10px; }
         var m = fin.vehicleMetrics(v);
         var dif = m.estimadoARS - m.costoTotalARS;
         stb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
-          el('td', {}, el('span', { class: 'cell-name', text: store.vehicleName(v) })),
+          el('td', {}, [
+            el('span', { class: 'cell-name', text: store.vehicleName(v) }),
+            (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consig.', 'pill-warn') : null
+          ]),
           el('td', { text: fmt.money(m.costoTotalARS) }),
           el('td', { text: fmt.money(m.estimadoARS) }),
           el('td', { class: dif >= 0 ? 'pos' : 'neg', text: (dif >= 0 ? '+' : '') + fmt.money(dif) })
@@ -6010,29 +6289,11 @@ details.card[open] > summary { margin-bottom: 10px; }
     }
     wrap.appendChild(stockCard);
 
-    // --- Rendimiento: mismos indicadores que ya calculaba la app, en filas compactas ---
-    var perfItems = [
-      ['Mayor ganancia', g.mayorGanancia, function (x) { return fmt.money(x.m.gananciaARS); }],
-      ['Venta más rápida', g.vendidoMasRapido, function (x) { return fmt.days(x.m.diasEnStock); }],
-      ['Más tiempo en stock', g.masTiempoStock, function (x) { return fmt.days(x.m.diasEnStock); }],
-      ['Mayor venta', g.mayorVenta, function (x) { return fmt.money(x.m.ventaARS); }]
-    ];
-    var rendCard = el('div', { class: 'card' }, [
-      el('h3', { text: '📈 Rendimiento' }),
-      el('div', { class: 'perf-list' }, perfItems.map(function (it) {
-        var label = it[0], w = it[1], valFn = it[2];
-        return el('div', { class: 'perf-row' }, [
-          el('span', { class: 'perf-label', text: label }),
-          w && w.v
-            ? el('a', { class: 'perf-name', href: '#/vehiculo/' + w.v.id, text: store.vehicleName(w.v) })
-            : el('span', { class: 'perf-name muted', text: '—' }),
-          el('span', { class: 'perf-value', text: w && w.v ? valFn(w) : '—' })
-        ]);
-      }))
-    ]);
-
     // --- Pendientes: cuotas por cobrar/pagar, gastos fijos y diferencia en USD ---
-    var pendCard = el('div', { class: 'card' }, [
+    // ("Rendimiento" se sacó de esta pantalla — los mismos datos
+    // (g.mayorGanancia, g.vendidoMasRapido, g.masTiempoStock, g.mayorVenta)
+    // se siguen usando tal cual en Resúmenes → Estadísticas del negocio.)
+    wrap.appendChild(el('div', { class: 'card' }, [
       el('h3', { text: '💰 Pendientes' }),
       el('div', { class: 'grid-2' }, [
         miniStat('Por cobrar', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
@@ -6040,12 +6301,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         miniStat('Gastos del negocio', fmt.money(g.gastosFijosTotales)),
         miniStat('Diferencia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg')
       ])
-    ]);
-
-    // En desktop quedan lado a lado (mismo .grid-2 que ya colapsa a 1
-    // columna en mobile); en la tarjeta de Pendientes se reutiliza esa
-    // misma clase para su propia grilla interna de 4 mini-stats.
-    wrap.appendChild(el('div', { class: 'grid-2' }, [rendCard, pendCard]));
+    ]));
 
     root.appendChild(wrap);
   }
@@ -6372,17 +6628,131 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   /* ==================== COMPARACIÓN DEL VALOR SEGÚN EL DÓLAR ========= */
+  // Junta, sin guardar nada nuevo, todas las ventas (compradas o en
+  // consignación) que tengan una comparación en dólares calculable —
+  // se arma en el momento con fin.dollarComparison() sobre los datos
+  // reales, así que no hay que volver a cargar nada a mano.
+  function comparacionesVendidas() {
+    var out = [];
+    store.activeVehicles().forEach(function (v) {
+      if (!v.sale || !v.sale.precio) return;
+      var c = fin.dollarComparison(v);
+      if (c && c.venta) out.push({ v: v, c: c });
+    });
+    return out;
+  }
+
+  var historialCmpState = { q: '', sort: 'fecha-desc', filtro: 'todos' };
+  function historialComparacionesView(panel, volver) {
+    var wrap = el('div', {});
+    wrap.appendChild(el('a', { class: 'back-link', href: '#', html: '‹ Volver a Comparar dólar', onclick: function (e) { e.preventDefault(); volver(); } }));
+    wrap.appendChild(el('h1', { text: 'Historial de comparaciones', style: 'margin-top:6px' }));
+    wrap.appendChild(el('p', { class: 'page-sub', text: 'Ventas con comparación en dólares, calculado con los datos reales de cada operación.' }));
+
+    var searchInput = ui.input({ value: historialCmpState.q, placeholder: 'Buscar vehículo...', class: 'input search-input' });
+    var sortSel = ui.select([
+      { value: 'fecha-desc', label: 'Más reciente' }, { value: 'fecha-asc', label: 'Más antiguo' },
+      { value: 'resultado-desc', label: 'Mayor ganancia' }, { value: 'resultado-asc', label: 'Mayor pérdida' }
+    ], historialCmpState.sort, { class: 'input select sort-select' });
+    var filtroSeg = el('div', { class: 'seg-control' }, [
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'todos' ? ' is-active' : ''), text: 'Todos', onclick: function () { historialCmpState.filtro = 'todos'; draw(); } }),
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'ganancia' ? ' is-active' : ''), text: 'Ganancias', onclick: function () { historialCmpState.filtro = 'ganancia'; draw(); } }),
+      el('button', { class: 'seg' + (historialCmpState.filtro === 'perdida' ? ' is-active' : ''), text: 'Pérdidas', onclick: function () { historialCmpState.filtro = 'perdida'; draw(); } })
+    ]);
+    wrap.appendChild(el('div', { class: 'toolbar' }, [
+      el('div', { class: 'toolbar-search' }, searchInput),
+      el('div', { class: 'toolbar-actions' }, [sortSel])
+    ]));
+    wrap.appendChild(filtroSeg);
+
+    var listWrap = el('div', { class: 'vehicle-list' });
+    var countEl = el('span', { class: 'count-tag' });
+    wrap.appendChild(el('div', { class: 'card' }, [
+      el('div', { class: 'card-head' }, [el('h3', { text: 'Ventas comparadas' }), countEl]),
+      listWrap
+    ]));
+
+    searchInput.addEventListener('input', function () { historialCmpState.q = searchInput.value; draw(); });
+    sortSel.addEventListener('change', function () { historialCmpState.sort = sortSel.value; draw(); });
+
+    function draw() {
+      ui.qsa('.seg', filtroSeg).forEach(function (b) { b.classList.toggle('is-active', b.textContent === ({ todos: 'Todos', ganancia: 'Ganancias', perdida: 'Pérdidas' })[historialCmpState.filtro]); });
+      var all = comparacionesVendidas();
+      var q = historialCmpState.q.trim().toLowerCase();
+      var list = all.filter(function (x) {
+        if (q && store.vehicleName(x.v).toLowerCase().indexOf(q) < 0) return false;
+        var gan = x.c.venta.gananciaUSD || 0;
+        if (historialCmpState.filtro === 'ganancia' && gan < 0) return false;
+        if (historialCmpState.filtro === 'perdida' && gan >= 0) return false;
+        return true;
+      });
+      list.sort(function (a, b) {
+        if (historialCmpState.sort === 'fecha-asc') return (a.v.sale.fecha || '').localeCompare(b.v.sale.fecha || '');
+        if (historialCmpState.sort === 'fecha-desc') return (b.v.sale.fecha || '').localeCompare(a.v.sale.fecha || '');
+        var ga = a.c.venta.gananciaUSD || 0, gb = b.c.venta.gananciaUSD || 0;
+        return historialCmpState.sort === 'resultado-desc' ? gb - ga : ga - gb;
+      });
+      ui.clear(listWrap);
+      countEl.textContent = list.length + ' de ' + all.length;
+      if (!list.length) { listWrap.appendChild(ui.emptyState('No hay ventas con comparación en dólares todavía.', '💵')); return; }
+      list.forEach(function (x) { listWrap.appendChild(cmpHistItem(x.v, x.c)); });
+    }
+    draw();
+
+    panel.appendChild(wrap);
+  }
+
+  function cmpHistItem(v, c) {
+    var vv = c.venta;
+    var gan = vv.gananciaUSD;
+    var pos = (gan || 0) >= 0;
+    return el('a', { class: 'cmp-hist-item', href: '#/vehiculo/' + v.id }, [
+      el('div', { class: 'cmp-hist-main' }, [
+        el('div', { class: 'cmp-hist-top' }, [
+          el('span', { class: 'row-name', text: store.vehicleName(v) }),
+          el('span', { class: 'cmp-hist-result ' + (pos ? 'pos' : 'neg'), text: gan != null ? ((pos ? '+' : '') + fmt.usd(gan)) : '—' })
+        ]),
+        el('div', { class: 'cmp-hist-detail' }, [
+          el('span', { text: 'Compra ' + (c.valorUSD != null ? fmt.usd(c.valorUSD) : '—') }),
+          el('span', { text: '→' }),
+          el('span', { text: 'Venta ' + (vv.valorUSDVenta != null ? fmt.usd(vv.valorUSDVenta) : '—') })
+        ]),
+        el('div', { class: 'home-stock-meta' }, [
+          el('span', { text: 'Vendido: ' + fmt.date(v.sale.fecha) }),
+          el('span', { text: 'Dólar compra: ' + (c.dolarCompra ? fmt.money(c.dolarCompra) : '—') }),
+          el('span', { text: 'Dólar venta: ' + (vv.dolarVenta ? fmt.money(vv.dolarVenta) : '—') })
+        ])
+      ]),
+      el('span', { class: 'pill ' + (pos ? 'pill-ok' : 'pill-danger'), text: pos ? 'Ganancia' : 'Pérdida' })
+    ]);
+  }
+
   function comparacionView(root, preselectId) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar'));
+    var panel = el('div', {});
 
-    var vehicles = store.getState().vehicles.filter(function (v) { return v.purchase; }); // incluye vendidos y en papelera (info histórica)
-    if (!vehicles.length) { wrap.appendChild(ui.emptyState('No hay vehículos con compra registrada para comparar.', '💵')); root.appendChild(wrap); return; }
+    var vehicles = store.getState().vehicles.filter(function (v) { return v.purchase || (v.origin && v.origin.type === 'consignacion'); }); // incluye vendidos y en papelera (info histórica)
+    if (!vehicles.length) {
+      wrap.appendChild(pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar'));
+      wrap.appendChild(ui.emptyState('No hay vehículos con compra o consignación registrada para comparar.', '💵'));
+      root.appendChild(wrap); return;
+    }
+
+    function showMain() { ui.clear(panel); renderMain(); }
+    function showHistorial() { ui.clear(panel); historialComparacionesView(panel, showMain); }
+    renderMain();
+    wrap.appendChild(panel);
+    root.appendChild(wrap);
+
+    function renderMain() {
+    var head = pageHead('Comparación del valor según el dólar', 'Analizá cómo cambió el valor de un auto teniendo en cuenta la variación del dólar');
+    head.appendChild(el('button', { class: 'btn btn-ghost', html: '<span>📜</span> Historial de comparaciones', onclick: showHistorial }));
+    panel.appendChild(head);
 
     var sel = ui.select(vehicles.map(function (v) {
       return { value: v.id, label: store.vehicleName(v) + (v.deleted ? ' (papelera)' : '') + (v.estado === 'vendido' ? ' · vendido' : '') };
     }), preselectId || vehicles[0].id);
-    var fDolar = ui.input({ inputmode: 'decimal', value: store.getState().settings.dolarActual || '', placeholder: 'Cotización actual del dólar' });
+    var fDolar = ui.moneyInput({ value: store.getState().settings.dolarActual || '', placeholder: 'Cotización actual del dólar' });
     var result = el('div', { class: 'cmp-dollar-result' });
 
     function calc() {
@@ -6456,15 +6826,15 @@ details.card[open] > summary { margin-bottom: 10px; }
     sel.addEventListener('change', calc);
     fDolar.addEventListener('input', calc);
 
-    wrap.appendChild(el('div', { class: 'card' }, [
+    panel.appendChild(el('div', { class: 'card' }, [
       el('div', { class: 'grid-2' }, [
         ui.field('Elegí un auto', sel),
         ui.field('Cotización actual del dólar', fDolar, 'Se ingresa manualmente y no modifica ningún valor histórico')
       ])
     ]));
-    wrap.appendChild(result);
+    panel.appendChild(result);
     calc();
-    root.appendChild(wrap);
+    }
   }
   function cmpItem(label, value, tag, tone, note) {
     return el('div', { class: 'cmp-item' }, [
@@ -6818,24 +7188,111 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   /* ============================== AJUSTES ========================== */
+  // Pantalla principal: categorías con filas cliqueables (mismo patrón de
+  // estado interno + volverLink ya usado en Resúmenes y Cuotas/Cobros, sin
+  // rutas nuevas). Cada fila abre exactamente la misma tarjeta que ya
+  // existía (cuentaCard/usuariosCard/avisosCard/snapshotsCard/resetCard/
+  // excelAutosaveCard/datosCard/parametrosCard) — ninguna lógica cambió,
+  // solo dónde se muestra.
+  var ajustesScreen = 'home';
   function ajustesView(root) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Ajustes', 'Configuración general'));
+    wrap.appendChild(pageHead('Ajustes', 'Configurá la aplicación y tu cuenta'));
 
-    // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
-    wrap.appendChild(el('div', { class: 'card' }, [
+    var online = !!(App.auth && App.auth.enabled);
+    var isAdmin = online && App.auth.isAdmin();
+    var showDanger = !online || isAdmin;
+
+    var content = el('div', {});
+    wrap.appendChild(content);
+    root.appendChild(wrap);
+
+    function goScreen(key) { ajustesScreen = key; render(); }
+    function volverLink() {
+      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Ajustes', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
+    }
+
+    var SUBSCREENS = {
+      cuenta: function () { return cuentaCard(); },
+      usuarios: function () { return usuariosCard(); },
+      preferencias: function () { return avisosCard(); },
+      financiero: function () { return parametrosCard(); },
+      datos: function () { return [datosCard(), snapshotsCard()]; },
+      sync: function () { return excelAutosaveCard(); },
+      peligro: function () { return resetCard(); }
+    };
+
+    function render() {
+      ui.clear(content);
+      if (ajustesScreen !== 'home' && SUBSCREENS[ajustesScreen]) {
+        content.appendChild(volverLink());
+        ui.appendChildren(content, SUBSCREENS[ajustesScreen]());
+        return;
+      }
+      ajustesScreen = 'home';
+
+      var cuentaRows = [];
+      if (online) {
+        cuentaRows.push(settingsRow('👤', 'Mi cuenta', (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || 'Tu perfil y sesión', function () { goScreen('cuenta'); }));
+        if (isAdmin) cuentaRows.push(settingsRow('👥', 'Usuarios', 'Quién puede entrar a la app', function () { goScreen('usuarios'); }));
+      }
+      cuentaRows.push(settingsRow('⚙️', 'Preferencias', 'Avisos del navegador', function () { goScreen('preferencias'); }));
+
+      [
+        settingsSection('Cuenta', cuentaRows),
+        settingsSection('Negocio', [
+          settingsRow('💰', 'Configuración financiera', 'Dólar de referencia y alertas', function () { goScreen('financiero'); })
+        ]),
+        settingsSection('Datos y sistema', [
+          settingsRow('💾', 'Datos', 'Papelera, exportar y copias de seguridad', function () { goScreen('datos'); }),
+          settingsRow('🔄', 'Sincronización', 'Guardado automático en Excel', function () { goScreen('sync'); })
+        ]),
+        showDanger ? settingsSection('Zona peligrosa', [
+          settingsRow('⚠️', 'Acciones avanzadas', 'Borrar todos los datos de la app', function () { goScreen('peligro'); }, true)
+        ]) : null
+      ].filter(Boolean).forEach(function (s) { content.appendChild(s); });
+    }
+
+    render();
+  }
+
+  function settingsRow(icon, title, desc, onclick, danger) {
+    return el('div', { class: 'settings-row' + (danger ? ' is-danger' : ''), onclick: onclick }, [
+      el('span', { class: 'settings-row-ico', text: icon }),
+      el('div', { class: 'settings-row-body' }, [
+        el('strong', { text: title }),
+        el('span', { text: desc })
+      ]),
+      el('span', { class: 'settings-row-chevron', text: '›' })
+    ]);
+  }
+  function settingsSection(title, rows) {
+    rows = (rows || []).filter(Boolean);
+    if (!rows.length) return null;
+    var danger = rows.some(function (r) { return r.classList.contains('is-danger'); });
+    return el('div', { class: 'settings-section' }, [
+      el('div', { class: 'form-section-title', text: title }),
+      el('div', { class: 'settings-group' + (danger ? ' danger-zone' : '') }, rows)
+    ]);
+  }
+
+  // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
+  function datosCard() {
+    return el('div', { class: 'card' }, [
       el('h3', { text: '🗂️ Datos' }),
       el('div', { class: 'row-btns' }, [
         el('a', { class: 'btn btn-ghost', href: '#/papelera', html: '<span>🗑️</span> Papelera' }),
         el('a', { class: 'btn btn-ghost', href: '#/exportar', html: '<span>📤</span> Exportar' })
       ])
-    ]));
+    ]);
+  }
 
+  function parametrosCard() {
     var s = store.getState().settings;
-    var fDolar = ui.input({ inputmode: 'decimal', value: s.dolarActual });
+    var fDolar = ui.moneyInput({ value: s.dolarActual });
     var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
     var fCuota = ui.input({ inputmode: 'numeric', value: s.cuotaProximaDias });
-    wrap.appendChild(el('div', { class: 'card' }, [
+    return el('div', { class: 'card' }, [
       el('h3', { text: 'Parámetros' }),
       el('div', { class: 'grid-2' }, [
         ui.field('Cotización actual del dólar', fDolar, 'Referencia general. Las comparaciones permiten ingresar otra puntual.'),
@@ -6846,27 +7303,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 });
         ui.toast('Ajustes guardados', 'success'); App.router.render();
       } })
-    ]));
-
-    // --- Usuarios (solo online + admin) ---
-    if (App.auth && App.auth.enabled) {
-      if (App.auth.isAdmin()) wrap.appendChild(usuariosCard());
-      wrap.appendChild(cuentaCard());
-    }
-
-    // --- Avisos del navegador ---
-    wrap.appendChild(avisosCard());
-
-    // --- Guardado automático en Excel ---
-    wrap.appendChild(excelAutosaveCard());
-
-    // --- Copias internas (restaurar) ---
-    wrap.appendChild(snapshotsCard());
-
-    // --- Zona peligrosa ---
-    if (!App.auth || !App.auth.enabled || App.auth.isAdmin()) wrap.appendChild(resetCard());
-
-    root.appendChild(wrap);
+    ]);
   }
 
   function cuentaCard() {

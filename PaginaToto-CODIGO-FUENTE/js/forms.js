@@ -33,11 +33,11 @@
     var lblDone = cobro ? 'Cobrada' : 'Pagada';
     var cuotas = (opts.initial || []).map(function (c) { return Object.assign({}, c); });
     var box = el('div', { class: 'cuotas-builder' });
-    var fCant = ui.input({ inputmode: 'numeric', placeholder: 'Cuotas', style: 'max-width:100px' });
-    var fMonto = ui.input({ inputmode: 'decimal', placeholder: 'Monto c/u', style: 'max-width:150px' });
+    var fCant = ui.input({ inputmode: 'numeric', placeholder: 'Ej: 12', style: 'max-width:100px' });
+    var fMonto = ui.moneyInput({ placeholder: '0', style: 'max-width:150px' });
     var fPrimer = ui.input({ type: 'date', value: store.todayISO(), style: 'max-width:160px' });
     var gen = el('button', {
-      type: 'button', class: 'btn btn-sm btn-ghost', text: 'Generar cuotas', onclick: function () {
+      type: 'button', class: 'btn btn-primary btn-sm', text: 'Generar cuotas ›', onclick: function () {
         var n = parseInt(fCant.value, 10), monto = store.num(fMonto.value);
         if (!n || n < 1) { ui.toast('Poné cuántas cuotas', 'error'); return; }
         var base = App.finance.parseDate(fPrimer.value) || new Date();
@@ -56,7 +56,7 @@
       if (!cuotas.length) { box.appendChild(el('p', { class: 'form-help', text: 'Todavía no generaste cuotas. Poné la cantidad, el monto y desde cuándo, y tocá "Generar cuotas".' })); return; }
       var totalEl = el('div', { class: 'cuota-total' });
       cuotas.forEach(function (c, i) {
-        var fM = ui.input({ inputmode: 'decimal', value: c.monto, style: 'max-width:130px' });
+        var fM = ui.moneyInput({ value: c.monto, style: 'max-width:130px' });
         fM.addEventListener('input', function () { c.monto = fM.value; upd(); });
         var fV = ui.input({ type: 'date', value: c.vencimiento, style: 'max-width:150px' });
         fV.addEventListener('input', function () { c.vencimiento = fV.value; });
@@ -82,7 +82,15 @@
     }
     render();
     return {
-      section: el('div', {}, [el('div', { class: 'inline-fields' }, [fCant, fMonto, fPrimer, gen]), box]),
+      section: el('div', {}, [
+        el('div', { class: 'inline-fields' }, [
+          ui.field('Cantidad de cuotas', fCant),
+          ui.field('Monto de cada una', fMonto),
+          ui.field('Primer vencimiento', fPrimer, 'Se generan mensuales, una por mes'),
+          gen
+        ]),
+        box
+      ]),
       render: render,
       getCuotas: function () { return cuotas.slice(); }
     };
@@ -109,19 +117,105 @@
     };
   }
 
+  // --- Campos de "Compra" reutilizables entre registrar (nuevo) y editar
+  // (desde dentro de "Editar vehículo", para poder corregir el precio de
+  // compra sin ir a un formulario aparte). Reusa exactamente store.setPurchase.
+  function compraFieldsBuilder(p) {
+    p = p || {};
+    var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
+    var precio = ui.money2('vfCompra', p.precio || '', p.moneda || 'ARS');
+    var fForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], p.formaPago || 'transferencia');
+    var fTransf = ui.moneyInput({ value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]), mixtoError]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
+    var cuotas = cuotaBuilder(function () { return precio.moneda.value; }, { initial: p.cuotas });
+    var pr = p.proveedor || {};
+    var fProvNom = ui.input({ value: pr.nombre || '', placeholder: 'Nombre (opcional)' });
+    var fProvTel = ui.input({ value: pr.telefono || '', placeholder: 'Teléfono (opcional)' });
+    function sync() { mixtoBox.hidden = fForma.value !== 'mixto'; cuotas.section.hidden = fForma.value !== 'cuotas'; }
+    fForma.addEventListener('change', sync);
+    sync(); checkMixto();
+    var node = el('div', { class: 'form-grid' }, [
+      el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', fFecha)]),
+      ui.field('Forma de pago', fForma),
+      mixtoBox,
+      cuotas.section,
+      el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)])
+    ]);
+    return {
+      node: node,
+      hasPrice: function () { return store.num(precio.monto.value) > 0; },
+      isValid: checkMixto,
+      getData: function () {
+        return {
+          fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
+          formaPago: fForma.value, montoTransferencia: fTransf.value, montoEfectivo: fEfec.value,
+          cuotas: fForma.value === 'cuotas' ? cuotas.getCuotas() : [],
+          proveedor: { nombre: fProvNom.value, telefono: fProvTel.value, notas: pr.notas || '' }
+        };
+      }
+    };
+  }
+
+  // --- Campos de "Consignación": el vehículo sigue siendo del dueño; el
+  // negocio NO lo compra (no se llama a store.setPurchase). Lo que le
+  // corresponde al dueño se descuenta al vender (ver finance.js). ---
+  function consignacionFieldsBuilder(o) {
+    o = o || {};
+    var fDuenio = ui.input({ value: (o.duenio && o.duenio.nombre) || '', placeholder: 'Nombre del dueño' });
+    var fTelDuenio = ui.input({ value: (o.duenio && o.duenio.telefono) || '', placeholder: 'Teléfono (opcional)' });
+    var precioDueno = ui.money2('vfConsig', o.precioDueno || '', o.monedaDueno || 'ARS');
+    var fFecha = ui.input({ type: 'date', value: o.fecha || store.todayISO() });
+    var fCotiz = ui.moneyInput({ value: o.cotizacionUSD || '', placeholder: '1500' });
+    var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz, 'Sirve para comparar en dólares más adelante');
+    var fNotas = ui.textarea({ value: o.notas || '', rows: 2, placeholder: 'Condiciones, observaciones (opcional)' });
+    function sync() { cotizField.hidden = precioDueno.moneda.value !== 'ARS'; }
+    precioDueno.moneda.addEventListener('change', sync); sync();
+    var node = el('div', { class: 'form-grid' }, [
+      el('div', { class: 'grid-2' }, [ui.field('Dueño del vehículo', fDuenio), ui.field('Teléfono', fTelDuenio)]),
+      el('div', { class: 'grid-2' }, [ui.field('Precio que pide el dueño', precioDueno.wrap), ui.field('Fecha de ingreso', fFecha)]),
+      cotizField,
+      ui.field('Notas / condiciones', fNotas)
+    ]);
+    return {
+      node: node,
+      hasOwnerName: function () { return !!fDuenio.value.trim(); },
+      getData: function () {
+        return {
+          type: 'consignacion',
+          duenio: { nombre: fDuenio.value.trim(), telefono: fTelDuenio.value.trim() },
+          precioDueno: precioDueno.monto.value, monedaDueno: precioDueno.moneda.value,
+          cotizacionUSD: fCotiz.value, fecha: fFecha.value, notas: fNotas.value
+        };
+      }
+    };
+  }
+
   /* ===================== PÁGINA: REGISTRAR / EDITAR VEHÍCULO ============= */
   // Antes era un modal grande con scroll interno; ahora es una página completa
   // (misma app, solo mejor organizada). Sigue usando EXACTAMENTE las mismas
-  // funciones de guardado de siempre:
-  //   - store.createVehicle / store.updateVehicle para los datos del vehículo
-  //     (mismos campos, misma validación, mismo checklist).
-  //   - store.setPurchase (la misma función que usa "Editar compra" en la
-  //     ficha) si se completa la compra en el mismo paso al registrar.
-  // No se creó ninguna función de guardado nueva.
+  // funciones de guardado de siempre: store.createVehicle / store.updateVehicle
+  // para los datos del vehículo, y store.setPurchase para la compra (la misma
+  // que usa "Editar compra" en la ficha) — tanto al registrar como, ahora
+  // también, al editar un vehículo existente.
   function vehicleFormView(root, vehicleId) {
     var existing = vehicleId ? store.getVehicle(vehicleId) : null;
     var isEdit = !!existing;
     var v = existing || {};
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
 
     var fMarca = ui.input({ value: v.marca || '', required: true, placeholder: 'Toyota' });
     var fModelo = ui.input({ value: v.modelo || '', required: true, placeholder: 'Corolla' });
@@ -136,48 +230,44 @@
     var pretendido = ui.money2('pretendido', v.precioPretendido || '', v.precioPretendidoMoneda || 'ARS');
     var fObs = ui.textarea({ value: v.observaciones || '', rows: 4, placeholder: 'Cualquier información relevante del vehículo...' });
 
-    var checkState = Object.assign({}, v.checklist || {});
-    var checkGrid = el('div', { class: 'check-grid' }, CHECKLIST_ITEMS.map(function (it) {
-      var cb = el('input', { type: 'checkbox' });
-      cb.checked = !!checkState[it[0]];
-      cb.addEventListener('change', function () { checkState[it[0]] = cb.checked; });
-      return el('label', { class: 'check-item' }, [cb, el('span', { text: it[1] })]);
-    }));
-
-    // --- Compra (opcional, solo al REGISTRAR un vehículo nuevo). Reutiliza
-    // los mismos componentes que "Editar compra" (cuotaBuilder, moneda,
-    // forma de pago). Para editar una compra ya cargada se sigue usando
-    // "Editar compra" desde la ficha, como siempre. ---
-    var precio, pFecha, pForma, pTransf, pEfec, pMixtoBox, pCuotas, pProvNom, pProvTel, compraCard;
+    // --- Origen: Compra o Consignación (solo al REGISTRAR un vehículo nuevo;
+    // no se puede cambiar el origen de un vehículo ya existente). ---
+    var origenCard, origenMode = 'compra', compraBuilder, consigBuilder;
     if (!isEdit) {
-      pFecha = ui.input({ type: 'date', value: store.todayISO() });
-      precio = ui.money2('compraPrecio', '', 'ARS');
-      pForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], 'transferencia');
-      pTransf = ui.input({ inputmode: 'decimal', placeholder: 'Monto transferencia' });
-      pEfec = ui.input({ inputmode: 'decimal', placeholder: 'Monto efectivo' });
-      pMixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', pTransf), ui.field('Monto en efectivo', pEfec)]);
-      pCuotas = cuotaBuilder(function () { return precio.moneda.value; }, {});
-      pProvNom = ui.input({ placeholder: 'Nombre (opcional)' });
-      pProvTel = ui.input({ placeholder: 'Teléfono (opcional)' });
+      compraBuilder = compraFieldsBuilder();
+      consigBuilder = consignacionFieldsBuilder();
+      var segCompra = el('button', { type: 'button', class: 'seg is-active', text: 'Compra' });
+      var segConsig = el('button', { type: 'button', class: 'seg', text: 'Consignación' });
+      function setOrigenMode(mode) {
+        origenMode = mode;
+        segCompra.classList.toggle('is-active', mode === 'compra');
+        segConsig.classList.toggle('is-active', mode === 'consignacion');
+        compraBuilder.node.hidden = mode !== 'compra';
+        consigBuilder.node.hidden = mode !== 'consignacion';
+      }
+      segCompra.addEventListener('click', function () { setOrigenMode('compra'); });
+      segConsig.addEventListener('click', function () { setOrigenMode('consignacion'); });
+      origenCard = el('div', { class: 'card' }, [
+        el('h3', { text: 'Origen del vehículo' }),
+        el('div', { class: 'seg-control' }, [segCompra, segConsig]),
+        el('p', { class: 'form-help', text: 'Compra: opcional, la podés cargar después. Consignación: el dueño lo entrega para que lo vendas vos — el negocio no lo compra, solo se queda con la diferencia al venderlo.' }),
+        compraBuilder.node, consigBuilder.node
+      ]);
+      setOrigenMode('compra');
+    }
 
-      var syncPForma = function () {
-        var f = pForma.value;
-        pMixtoBox.hidden = f !== 'mixto';
-        pCuotas.section.hidden = f !== 'cuotas';
-      };
-      pForma.addEventListener('change', syncPForma);
-      syncPForma();
-
-      compraCard = el('div', { class: 'card' }, [
+    // --- Edición: permite corregir la compra (o los datos de consignación)
+    // de un vehículo ya existente, sin ir a un formulario aparte. ---
+    var editCompraBuilder = null, editConsigBuilder = null, editOrigenCard = null;
+    if (isEdit && esConsignacion) {
+      editConsigBuilder = consignacionFieldsBuilder(v.origin);
+      editOrigenCard = el('div', { class: 'card' }, [el('h3', { text: '🤝 Consignación' }), editConsigBuilder.node]);
+    } else if (isEdit && v.purchase) {
+      editCompraBuilder = compraFieldsBuilder(v.purchase);
+      editOrigenCard = el('div', { class: 'card' }, [
         el('h3', { text: 'Compra' }),
-        el('p', { class: 'form-help', text: 'Opcional: si todavía no la tenés, la podés cargar después desde la ficha ("Registrar compra").' }),
-        el('div', { class: 'form-grid' }, [
-          el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', pFecha)]),
-          ui.field('Forma de pago', pForma),
-          pMixtoBox,
-          pCuotas.section,
-          el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', pProvNom), ui.field('Teléfono', pProvTel)])
-        ])
+        el('p', { class: 'form-help', text: 'Corregí el precio u otros datos de la compra. La inversión, la ganancia y toda la economía se recalculan solas.' }),
+        editCompraBuilder.node
       ]);
     }
 
@@ -195,7 +285,8 @@
         ])
       ]),
 
-      compraCard,
+      origenCard,
+      editOrigenCard,
 
       el('div', { class: 'card' }, [
         el('h3', { text: 'Estado' }),
@@ -208,12 +299,6 @@
         ui.field('Observaciones', fObs)
       ]),
 
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Checklist' }),
-        el('p', { class: 'form-help', text: 'Revisión del vehículo (opcional)' }),
-        checkGrid
-      ]),
-
       el('div', { class: 'form-actions' }, [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { App.router.go(isEdit ? 'vehiculo/' + v.id : ''); } }),
         el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar cambios' : 'Registrar vehículo', onclick: submit })
@@ -224,31 +309,30 @@
     function submit() {
       if (submitted) return;
       if (!fMarca.value.trim() || !fModelo.value.trim()) { ui.toast('Marca y modelo son obligatorios', 'error'); return; }
+      if (!isEdit && origenMode === 'compra' && compraBuilder.hasPrice() && !compraBuilder.isValid()) { ui.toast('Los importes de la compra no coinciden con el total', 'error'); return; }
+      if (!isEdit && origenMode === 'consignacion' && !consigBuilder.hasOwnerName()) { ui.toast('Ingresá el nombre del dueño', 'error'); return; }
+      if (editCompraBuilder && editCompraBuilder.hasPrice() && !editCompraBuilder.isValid()) { ui.toast('Los importes de la compra no coinciden con el total', 'error'); return; }
       submitted = true;
       var data = {
         marca: fMarca.value, modelo: fModelo.value, anio: fAnio.value, patente: fPatente.value,
         km: fKm.value, combustible: fComb.value, caja: fCaja.value, version: fVersion.value,
         estado: fEstado.value, documentacion: fDoc.value,
         precioPretendido: pretendido.monto.value, precioPretendidoMoneda: pretendido.moneda.value,
-        observaciones: fObs.value, checklist: checkState
+        observaciones: fObs.value
       };
+      if (!isEdit && origenMode === 'consignacion') data.origin = consigBuilder.getData();
+      if (isEdit && editConsigBuilder) data.origin = editConsigBuilder.getData();
+
       if (isEdit) {
         store.updateVehicle(v.id, data);
+        if (editCompraBuilder && editCompraBuilder.hasPrice()) store.setPurchase(v.id, editCompraBuilder.getData());
         ui.toast('Vehículo actualizado', 'success');
         App.router.go('vehiculo/' + v.id);
         return;
       }
       var nv = store.createVehicle(data);
-      if (precio && store.num(precio.monto.value) > 0) {
-        store.setPurchase(nv.id, {
-          fecha: pFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
-          formaPago: pForma.value,
-          montoTransferencia: pTransf.value, montoEfectivo: pEfec.value,
-          cuotas: pForma.value === 'cuotas' ? pCuotas.getCuotas() : [],
-          proveedor: { nombre: pProvNom.value, telefono: pProvTel.value, notas: '' }
-        });
-      }
-      ui.toast('Vehículo registrado', 'success');
+      if (origenMode === 'compra' && compraBuilder.hasPrice()) store.setPurchase(nv.id, compraBuilder.getData());
+      ui.toast(origenMode === 'consignacion' ? 'Consignación registrada' : 'Vehículo registrado', 'success');
       App.router.go('vehiculo/' + nv.id);
     }
 
@@ -263,13 +347,29 @@
 
     var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
     var precio = ui.money2('precio', p.precio || '', p.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: p.cotizacionUSD || '', placeholder: '1500' });
+    var fCotiz = ui.moneyInput({ value: p.cotizacionUSD || '', placeholder: '1500' });
     var cotizField = ui.field('Cotización del dólar al momento de la compra', fCotiz, 'Se guarda como valor histórico y no cambia luego');
 
     var fForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], p.formaPago || 'transferencia');
-    var fTransf = ui.input({ inputmode: 'decimal', value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
-    var fEfec = ui.input({ inputmode: 'decimal', value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
-    var mixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]);
+    var fTransf = ui.moneyInput({ value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [
+      el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]),
+      mixtoError
+    ]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
 
     var cb = cuotaBuilder(function () { return precio.moneda.value; }, { initial: p.cuotas });
     var cuotasSection = cb.section;
@@ -315,7 +415,7 @@
         el('button', { class: 'btn btn-primary', text: 'Guardar compra', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz();
+    syncForma(); syncCotiz(); checkMixto();
 
     var submitted = false;
     function submit() {
@@ -324,6 +424,7 @@
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) {
         ui.toast('Ingresá la cotización del dólar de la compra', 'error'); return;
       }
+      if (!checkMixto()) { ui.toast('Los importes no coinciden con el total', 'error'); return; }
       submitted = true;
       var data = {
         fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
@@ -345,12 +446,13 @@
   function saleForm(vehicleId) {
     var v = store.getVehicle(vehicleId);
     if (!v) return;
-    if (!v.purchase) { ui.toast('Primero registrá la compra del vehículo', 'error'); return; }
+    var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
+    if (!v.purchase && !esConsignacion) { ui.toast('Primero registrá la compra del vehículo', 'error'); return; }
     var s = v.sale || {};
 
     var fFecha = ui.input({ type: 'date', value: s.fecha || store.todayISO() });
     var precio = ui.money2('venta', s.precio || '', s.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: s.cotizacionUSD || '', placeholder: '1600' });
+    var fCotiz = ui.moneyInput({ value: s.cotizacionUSD || '', placeholder: '1600' });
     var cotizField = ui.field('Cotización del dólar al momento de la venta', fCotiz, 'Valor histórico, no cambia luego');
     var fForma = ui.select([
       opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'),
@@ -358,9 +460,25 @@
       opt('financiado', 'Financiado / con prenda (en cuotas)'),
       opt('vehiculo', 'Entrega de otro vehículo como parte de pago')
     ], s.formaCobro || 'transferencia');
-    var fTransf = ui.input({ inputmode: 'decimal', value: s.montoTransferencia || '', placeholder: 'Monto transferencia' });
-    var fEfec = ui.input({ inputmode: 'decimal', value: s.montoEfectivo || '', placeholder: 'Monto efectivo' });
-    var mixtoBox = el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]);
+    var fTransf = ui.moneyInput({ value: s.montoTransferencia || '', placeholder: 'Monto transferencia' });
+    var fEfec = ui.moneyInput({ value: s.montoEfectivo || '', placeholder: 'Monto efectivo' });
+    var mixtoError = el('p', { class: 'auth-err', hidden: true });
+    var mixtoBox = el('div', {}, [
+      el('div', { class: 'grid-2' }, [ui.field('Monto por transferencia', fTransf), ui.field('Monto en efectivo', fEfec)]),
+      mixtoError
+    ]);
+    function checkMixto() {
+      if (fForma.value !== 'mixto') { mixtoError.hidden = true; return true; }
+      var total = store.num(precio.monto.value);
+      var sum = store.num(fTransf.value) + store.num(fEfec.value);
+      var ok = Math.abs(total - sum) <= 0.01;
+      mixtoError.hidden = ok;
+      if (!ok) mixtoError.textContent = 'Transferencia + efectivo (' + App.fmt.money(sum) + ') no coincide con el precio total (' + App.fmt.money(total) + ').';
+      return ok;
+    }
+    [fTransf, fEfec].forEach(function (i) { i.addEventListener('input', checkMixto); });
+    precio.monto.addEventListener('input', checkMixto);
+    fForma.addEventListener('change', checkMixto);
 
     // financiación (cuotas a cobrar)
     var f = s.financiacion || {};
@@ -432,12 +550,15 @@
       var m = App.finance.vehicleMetrics(v);
       var sRate = store.num(fCotiz.value) || App.finance.currentRate();
       var ventaARS = precio.moneda.value === 'USD' ? store.num(precio.monto.value) * sRate : store.num(precio.monto.value);
-      var costo = m.inversionARS + m.comisionCompraARS + (store.num(comision.get() && comision.get().monto) || 0);
+      // en consignación no "compramos" el auto: lo que hay que descontar de la
+      // venta es lo que le corresponde al dueño, no un costo de compra propio.
+      var precioDuenoARS = esConsignacion && v.origin.precioDueno ? App.finance.toARS(v.origin.precioDueno, v.origin.monedaDueno || 'ARS', sRate) : 0;
+      var costo = m.inversionARS + m.comisionCompraARS + precioDuenoARS + (store.num(comision.get() && comision.get().monto) || 0);
       var gan = ventaARS - costo;
       var rent = costo ? gan / costo * 100 : 0;
       ui.clear(preview);
       preview.appendChild(el('div', { class: 'sale-preview-row' }, [
-        el('span', { text: 'Lo que pusiste (compra + gastos + comisión)' }), el('strong', { text: App.fmt.money(costo) })
+        el('span', { text: esConsignacion ? 'Le corresponde al dueño + gastos + comisión' : 'Lo que pusiste (compra + gastos + comisión)' }), el('strong', { text: App.fmt.money(costo) })
       ]));
       preview.appendChild(el('div', { class: 'sale-preview-row' }, [
         el('span', { text: 'Ganancia estimada' }),
@@ -472,13 +593,14 @@
         el('button', { class: 'btn btn-primary', text: 'Guardar venta', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz(); updatePreview();
+    syncForma(); syncCotiz(); updatePreview(); checkMixto();
 
     var submitted = false;
     function submit() {
       if (submitted) return;
       if (store.num(precio.monto.value) <= 0) { ui.toast('Ingresá el precio de venta', 'error'); return; }
       if (precio.moneda.value === 'ARS' && store.num(fCotiz.value) <= 0) { ui.toast('Ingresá la cotización del dólar de la venta', 'error'); return; }
+      if (!checkMixto()) { ui.toast('Los importes no coinciden con el total', 'error'); return; }
       var tradeIn = null;
       if (tiEnabled.checked && !ti.vehicleId) {
         if (!tiMarca.value.trim() || !tiModelo.value.trim()) { ui.toast('Completá marca y modelo del vehículo recibido', 'error'); return; }
@@ -576,7 +698,7 @@
     var e = expense || {};
     var monto = ui.money2('gasto', e.monto || '', e.moneda || 'ARS');
     var fFecha = ui.input({ type: 'date', value: e.fecha || store.todayISO() });
-    var fCotiz = ui.input({ inputmode: 'decimal', value: e.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
+    var fCotiz = ui.moneyInput({ value: e.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz, 'Si el gasto es en dólares y querés fijar una cotización distinta a la de la compra');
     var fObs = ui.textarea({ value: e.observacion || '', rows: 3, placeholder: 'Ej: 200 lucas en el vidrio delantero y cambio de aceite.' });
     function syncCotiz() { cotizField.hidden = monto.moneda.value !== 'USD'; }
@@ -627,7 +749,7 @@
     var fConcepto = ui.input({ value: f.concepto || '', required: true, placeholder: 'Ej: Alquiler del local' });
     var fCat = ui.select(GASTO_CATS.map(function (c) { return opt(c[0], c[1]); }), f.categoria || 'otro');
     var monto = ui.money2('fijo', f.monto || '', f.moneda || 'ARS');
-    var fCotiz = ui.input({ inputmode: 'decimal', value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
+    var fCotiz = ui.moneyInput({ value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz);
     var fFrec = ui.select([opt('mensual', 'Todos los meses'), opt('unica', 'Una sola vez')], f.frecuencia || 'mensual');
     var fFecha = ui.input({ type: 'date', value: f.fecha || store.todayISO() });
@@ -713,11 +835,26 @@
     var fRepeat = ui.select(REM_REPEAT.map(function (t) { return opt(t[0], t[1]); }), r.repeat || 'none');
     var fNota = ui.textarea({ value: r.nota || '', rows: 3, placeholder: 'Detalle o nota (opcional)' });
 
+    // Solo título y fecha son realmente necesarios para crear una alerta en
+    // segundos; el resto (hora, tipo, repetir, nota) queda opcional detrás
+    // de "Más opciones" — mismos campos y lógica de siempre, nada eliminado.
+    var extra = el('div', { class: 'form-grid', hidden: true }, [
+      el('div', { class: 'grid-2' }, [ui.field('Hora (opcional)', fHora), ui.field('Tipo', fTipo)]),
+      ui.field('Repetir', fRepeat),
+      ui.field('Descripción / nota (opcional)', fNota)
+    ]);
+    var hayOpcionalesCargados = !!(r.hora || (r.tipo && r.tipo !== 'tarea') || (r.repeat && r.repeat !== 'none') || r.nota);
+    extra.hidden = !hayOpcionalesCargados;
+    var toggleExtra = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: extra.hidden ? '＋ Más opciones' : '－ Menos opciones', onclick: function () {
+      extra.hidden = !extra.hidden;
+      toggleExtra.textContent = extra.hidden ? '＋ Más opciones' : '－ Menos opciones';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       ui.field('Título *', fTitulo),
-      el('div', { class: 'grid-2' }, [ui.field('Fecha *', fFecha), ui.field('Hora (opcional)', fHora)]),
-      el('div', { class: 'grid-2' }, [ui.field('Tipo', fTipo), ui.field('Repetir', fRepeat)]),
-      ui.field('Descripción / nota (opcional)', fNota)
+      ui.field('Fecha *', fFecha),
+      toggleExtra,
+      extra
     ]);
 
     var footer = [

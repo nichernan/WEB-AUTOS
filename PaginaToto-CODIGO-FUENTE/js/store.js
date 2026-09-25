@@ -189,6 +189,20 @@
     };
   }
 
+  // Consignación: precioDueno/cotizacionUSD llegan del formulario como texto
+  // (posiblemente con separador de miles, ej. "10.000") — hay que pasarlos
+  // por num() antes de guardarlos, igual que ya se hace con cualquier otro
+  // importe (precio de compra/venta, gastos, cuotas), para que finance.js
+  // los pueda usar como números reales.
+  function normalizeOrigin(o) {
+    if (!o) return { type: 'compra' };
+    if (o.type === 'consignacion') {
+      if (o.precioDueno != null && o.precioDueno !== '') o.precioDueno = num(o.precioDueno); else o.precioDueno = 0;
+      if (o.cotizacionUSD != null && o.cotizacionUSD !== '') o.cotizacionUSD = num(o.cotizacionUSD); else o.cotizacionUSD = null;
+    }
+    return o;
+  }
+
   function normalizeVehicle(v) {
     v.anio = toIntOrNull(v.anio);
     v.km = toIntOrNull(v.km);
@@ -198,6 +212,7 @@
     v.estado = v.estado || 'stock';
     v.documentacion = v.documentacion || 'pendiente';
     v.observaciones = v.observaciones || '';
+    v.precioPretendido = (v.precioPretendido != null && v.precioPretendido !== '') ? num(v.precioPretendido) : null;
     if (!v.purchase) v.purchase = null;
     if (!v.sale) v.sale = null;
     if (typeof v.reservation === 'undefined') v.reservation = null;
@@ -211,7 +226,7 @@
         v.sale.financiacion.cuotas = Array.isArray(v.sale.financiacion.cuotas) ? v.sale.financiacion.cuotas : [];
       } else v.sale.financiacion = null;
     }
-    if (!v.origin) v.origin = { type: 'compra' };
+    v.origin = normalizeOrigin(v.origin);
     if (typeof v.deleted !== 'boolean') v.deleted = false;
     return v;
   }
@@ -263,7 +278,7 @@
       sale: null,
       reservation: null,
       expenses: [],
-      origin: data.origin || { type: 'compra' },
+      origin: normalizeOrigin(data.origin || { type: 'compra' }),
       deleted: false,
       deletedAt: null,
       createdAt: Date.now(),
