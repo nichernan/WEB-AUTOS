@@ -148,12 +148,19 @@
     function sync() { mixtoBox.hidden = fForma.value !== 'mixto'; cuotas.section.hidden = fForma.value !== 'cuotas'; }
     fForma.addEventListener('change', sync);
     sync(); checkMixto();
+    // Proveedor/vendedor es un dato secundario: no hace falta para registrar
+    // la compra, así que queda detrás de "+ Más datos" (mismo patrón que Alertas).
+    var provBox = el('div', { class: 'grid-2', hidden: !(pr.nombre || pr.telefono) }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)]);
+    var provToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos', onclick: function () {
+      provBox.hidden = !provBox.hidden;
+      provToggle.textContent = provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos';
+    } });
     var node = el('div', { class: 'form-grid' }, [
       el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', fFecha)]),
       ui.field('Forma de pago', fForma),
       mixtoBox,
       cuotas.section,
-      el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)])
+      provToggle, provBox
     ]);
     return {
       node: node,
@@ -184,11 +191,18 @@
     var fNotas = ui.textarea({ value: o.notas || '', rows: 2, placeholder: 'Condiciones, observaciones (opcional)' });
     function sync() { cotizField.hidden = precioDueno.moneda.value !== 'ARS'; }
     precioDueno.moneda.addEventListener('change', sync); sync();
+    // Teléfono del dueño, cotización y notas son secundarios para arrancar
+    // una consignación: quedan detrás de "+ Más datos".
+    var hayExtra = !!(o.duenio && o.duenio.telefono) || !!o.cotizacionUSD || !!o.notas;
+    var extraBox = el('div', { hidden: !hayExtra }, [ui.field('Teléfono del dueño', fTelDuenio), cotizField, ui.field('Notas / condiciones', fNotas)]);
+    var extraToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: extraBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      extraBox.hidden = !extraBox.hidden;
+      extraToggle.textContent = extraBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
     var node = el('div', { class: 'form-grid' }, [
-      el('div', { class: 'grid-2' }, [ui.field('Dueño del vehículo', fDuenio), ui.field('Teléfono', fTelDuenio)]),
+      ui.field('Dueño del vehículo', fDuenio),
       el('div', { class: 'grid-2' }, [ui.field('Precio que pide el dueño', precioDueno.wrap), ui.field('Fecha de ingreso', fFecha)]),
-      cotizField,
-      ui.field('Notas / condiciones', fNotas)
+      extraToggle, extraBox
     ]);
     return {
       node: node,
@@ -271,33 +285,52 @@
       ]);
     }
 
+    // Lo esencial para empezar: Marca, Modelo, Año y el Origen (arriba,
+    // siempre visible). Patente/Km/Combustible/Caja/Versión, Estado,
+    // Documentación, precio pretendido y observaciones son datos que se
+    // pueden cargar después — quedan agrupados detrás de un solo
+    // "+ Más datos" (mismo patrón ya usado en Alertas), sin eliminar
+    // ningún campo.
+    var hayDatosExtra = !!(v.patente || v.km != null || v.combustible || v.caja || v.version
+      || (v.estado && v.estado !== 'stock') || (v.documentacion && v.documentacion !== 'pendiente')
+      || v.precioPretendido || v.observaciones);
+    var masDatosBox = el('div', { hidden: !hayDatosExtra }, [
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Más datos del vehículo' }),
+        el('div', { class: 'grid-2' }, [
+          ui.field('Patente', fPatente), ui.field('Kilometraje', fKm),
+          ui.field('Combustible', fComb), ui.field('Tipo de caja', fCaja),
+          ui.field('Versión', fVersion), ui.field('Estado', fEstado),
+          ui.field('Documentación', fDoc)
+        ])
+      ]),
+      el('div', { class: 'card' }, [
+        el('h3', { text: 'Información adicional' }),
+        ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock'),
+        ui.field('Observaciones', fObs)
+      ])
+    ]);
+    var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      masDatosBox.hidden = !masDatosBox.hidden;
+      masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+
     var page = el('div', { class: 'page vehicle-form-page' }, [
       el('a', { class: 'back-link', href: isEdit ? '#/vehiculo/' + v.id : '#/', html: '‹ Volver' }),
       el('h1', { text: isEdit ? 'Editar vehículo' : 'Registrar vehículo' }),
 
       el('div', { class: 'card' }, [
-        el('h3', { text: 'Información del vehículo' }),
+        el('h3', { text: 'Datos del vehículo' }),
         el('div', { class: 'grid-2' }, [
           ui.field('Marca *', fMarca), ui.field('Modelo *', fModelo),
-          ui.field('Año', fAnio), ui.field('Patente', fPatente),
-          ui.field('Kilometraje', fKm), ui.field('Combustible', fComb),
-          ui.field('Tipo de caja', fCaja), ui.field('Versión', fVersion)
+          ui.field('Año', fAnio)
         ])
       ]),
 
       origenCard,
       editOrigenCard,
 
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Estado' }),
-        el('div', { class: 'grid-2' }, [ui.field('Estado', fEstado), ui.field('Documentación', fDoc)])
-      ]),
-
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Información adicional' }),
-        el('div', { class: 'grid-2' }, [ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock')]),
-        ui.field('Observaciones', fObs)
-      ]),
+      masDatosToggle, masDatosBox,
 
       el('div', { class: 'form-actions' }, [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { App.router.go(isEdit ? 'vehiculo/' + v.id : ''); } }),
@@ -390,6 +423,20 @@
     function syncCotiz() { cotizField.hidden = precio.moneda.value !== 'ARS'; }
     precio.moneda.addEventListener('change', function () { syncCotiz(); cb.render(); });
 
+    // Vendedor/proveedor y comisión son secundarios: detrás de "+ Más datos".
+    var hayMasDatos = !!(pr.nombre || pr.telefono || pr.notas || (p.comision && p.comision.monto));
+    var masDatosBox = el('div', { hidden: !hayMasDatos }, [
+      el('div', { class: 'form-section-title', text: 'Vendedor / proveedor (opcional)' }),
+      el('div', { class: 'grid-2' }, [ui.field('Nombre', fProvNom), ui.field('Teléfono', fProvTel)]),
+      ui.field('Otros datos', fProvNotas),
+      el('div', { class: 'form-section-title', text: 'Comisión pagada a un tercero (opcional)' }),
+      comision.wrap
+    ]);
+    var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      masDatosBox.hidden = !masDatosBox.hidden;
+      masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       el('div', { class: 'grid-2' }, [
         ui.field('Fecha de compra', fFecha),
@@ -400,11 +447,7 @@
       ui.field('', fForma),
       mixtoBox,
       cuotasSection,
-      el('div', { class: 'form-section-title', text: 'Vendedor / proveedor (opcional)' }),
-      el('div', { class: 'grid-2' }, [ui.field('Nombre', fProvNom), ui.field('Teléfono', fProvTel)]),
-      ui.field('Otros datos', fProvNotas),
-      el('div', { class: 'form-section-title', text: 'Comisión pagada a un tercero (opcional)' }),
-      comision.wrap
+      masDatosToggle, masDatosBox
     ]);
 
     var m = ui.modal({
@@ -547,6 +590,13 @@
 
     var preview = el('div', { class: 'sale-preview' });
     function updatePreview() {
+      // Sin precio todavía no hay nada que calcular: mostrar un estado neutro
+      // en vez de "-100%" en rojo, que se lee como un error.
+      if (store.num(precio.monto.value) <= 0) {
+        ui.clear(preview);
+        preview.appendChild(el('p', { class: 'form-help', text: 'Ingresá el precio de venta para calcular la ganancia.' }));
+        return;
+      }
       var m = App.finance.vehicleMetrics(v);
       var sRate = store.num(fCotiz.value) || App.finance.currentRate();
       var ventaARS = precio.moneda.value === 'USD' ? store.num(precio.monto.value) * sRate : store.num(precio.monto.value);
@@ -567,6 +617,21 @@
     }
     [precio.monto, precio.moneda, fCotiz].forEach(function (i) { i.addEventListener('input', updatePreview); i.addEventListener('change', updatePreview); });
 
+    // Cliente y comisión son datos secundarios para registrar la venta:
+    // quedan detrás de "+ Más datos" (mismo patrón que Alertas).
+    var hayMasDatos = !!(cl.nombre || cl.telefono || cl.notas || (s.comision && s.comision.monto));
+    var masDatosBox = el('div', { hidden: !hayMasDatos }, [
+      el('div', { class: 'form-section-title', text: 'Cliente (opcional)' }),
+      el('div', { class: 'grid-2' }, [ui.field('Nombre', clNom), ui.field('Teléfono', clTel)]),
+      ui.field('Otros datos', clNotas),
+      el('div', { class: 'form-section-title', text: 'Comisión pagada a un tercero (opcional)' }),
+      comision.wrap
+    ]);
+    var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      masDatosBox.hidden = !masDatosBox.hidden;
+      masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       el('div', { class: 'grid-2' }, [ui.field('Fecha de venta', fFecha), ui.field('Precio de venta', precio.wrap)]),
       cotizField,
@@ -578,11 +643,7 @@
       el('div', { class: 'form-section-title', text: 'Vehículo recibido como parte de pago' }),
       el('label', { class: 'check-inline' }, [tiEnabled, el('span', { text: 'Se recibió otro vehículo como parte de pago' })]),
       tiBox,
-      el('div', { class: 'form-section-title', text: 'Cliente (opcional)' }),
-      el('div', { class: 'grid-2' }, [ui.field('Nombre', clNom), ui.field('Teléfono', clTel)]),
-      ui.field('Otros datos', clNotas),
-      el('div', { class: 'form-section-title', text: 'Comisión pagada a un tercero (opcional)' }),
-      comision.wrap
+      masDatosToggle, masDatosBox
     ]);
 
     var m = ui.modal({

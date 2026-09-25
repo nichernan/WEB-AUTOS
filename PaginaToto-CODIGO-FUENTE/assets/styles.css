@@ -413,6 +413,17 @@ img { max-width: 100%; display: block; }
 .tabs {
   display: flex; gap: 4px; border-bottom: 1px solid var(--c-border);
   overflow-x: auto; scrollbar-width: none;
+  /* Sombra a los costados que indica "hay más pestañas" — solo aparece
+     cuando realmente hay contenido oculto a ese lado (truco de scroll con
+     background-attachment: local/scroll), sin JS ni medir nada. */
+  background:
+    linear-gradient(to right, var(--c-bg) 30%, rgba(0,0,0,0)) left,
+    linear-gradient(to left, var(--c-bg) 30%, rgba(0,0,0,0)) right,
+    linear-gradient(to right, rgba(0,0,0,.16), rgba(0,0,0,0)) left,
+    linear-gradient(to left, rgba(0,0,0,.16), rgba(0,0,0,0)) right;
+  background-repeat: no-repeat;
+  background-size: 26px 100%, 26px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
@@ -428,8 +439,8 @@ img { max-width: 100%; display: block; }
 .data-list { display: flex; flex-direction: column; min-width: 0; }
 .data-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px dashed var(--c-border); font-size: .9rem; min-width: 0; }
 .data-row:last-child { border-bottom: none; }
-.data-k { color: var(--c-text-mute); min-width: 0; overflow-wrap: break-word; }
-.data-v { font-weight: 550; text-align: right; min-width: 0; overflow-wrap: break-word; }
+.data-k { color: var(--c-text-mute); flex: 0 0 auto; max-width: 42%; overflow-wrap: break-word; }
+.data-v { font-weight: 550; text-align: right; flex: 1; min-width: 0; overflow-wrap: break-word; }
 
 .invest-summary, .cuotas-summary, .sale-preview {
   display: flex; gap: 22px; flex-wrap: wrap; background: var(--c-surface-2);
@@ -612,6 +623,8 @@ body.modal-open { overflow: hidden; }
 .contact-item summary::-webkit-details-marker { display: none; }
 .contact-item summary strong { min-width: 0; overflow-wrap: break-word; }
 .contact-item .count-tag { margin-left: auto; flex-shrink: 0; }
+.phone-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.phone-action { width: 28px; height: 28px; font-size: .85rem; text-decoration: none; }
 .contact-ops { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 4px 12px; min-width: 0; }
 .contact-op { display: flex; justify-content: space-between; gap: 12px; font-size: .84rem; padding: 6px 8px; border-radius: 7px; min-width: 0; }
 .contact-op span:first-child { min-width: 0; overflow-wrap: break-word; }

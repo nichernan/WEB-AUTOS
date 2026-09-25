@@ -356,10 +356,13 @@
     wrap.appendChild(pageHead('Situación económica', 'Cómo está el negocio, de un vistazo'));
 
     // --- Lo más importante: resultado del negocio ---
+    // Es un acumulado histórico (todas las ventas − todos los gastos fijos
+    // cargados, sin recorte de fecha) — mismo cálculo de siempre, solo se
+    // aclara el período en el título para que no se lea como "de hoy".
     wrap.appendChild(el('div', { class: 'econ-hero' }, [
-      el('span', { class: 'econ-hero-label', text: 'Resultado del negocio' }),
+      el('span', { class: 'econ-hero-label', text: 'Resultado histórico del negocio' }),
       el('span', { class: 'econ-hero-value ' + (g.resultadoNegocio >= 0 ? 'pos' : 'neg'), text: (g.resultadoNegocio >= 0 ? '+' : '') + fmt.money(g.resultadoNegocio) }),
-      el('span', { class: 'econ-hero-sub', text: 'Ganancia por autos vendidos − gastos fijos del negocio' })
+      el('span', { class: 'econ-hero-sub', text: 'Ganancia acumulada por autos vendidos − gastos fijos acumulados. Para un período puntual, mirá Resúmenes.' })
     ]));
 
     // --- Tres métricas principales, más discretas que el resultado ---
@@ -382,24 +385,24 @@
     if (!enStock.length) {
       stockCard.appendChild(ui.emptyState('No hay vehículos en stock.', '🚗'));
     } else {
-      var stockTable = el('table', { class: 'data-table' });
-      stockTable.appendChild(el('thead', {}, el('tr', {}, ['Vehículo', 'Inversión', 'Valor estimado', 'Diferencia'].map(function (h) { return el('th', { text: h }); }))));
-      var stb = el('tbody');
-      enStock.forEach(function (v) {
+      // Tarjetas en vez de tabla: mismo dato, sin scroll horizontal en mobile.
+      stockCard.appendChild(el('div', { class: 'rem-list' }, enStock.map(function (v) {
         var m = fin.vehicleMetrics(v);
         var dif = m.estimadoARS - m.costoTotalARS;
-        stb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + v.id); } }, [
-          el('td', {}, [
-            el('span', { class: 'cell-name', text: store.vehicleName(v) }),
-            (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consig.', 'pill-warn') : null
-          ]),
-          el('td', { text: fmt.money(m.costoTotalARS) }),
-          el('td', { text: fmt.money(m.estimadoARS) }),
-          el('td', { class: dif >= 0 ? 'pos' : 'neg', text: (dif >= 0 ? '+' : '') + fmt.money(dif) })
-        ]));
-      });
-      stockTable.appendChild(stb);
-      stockCard.appendChild(el('div', { class: 'table-wrap' }, stockTable));
+        return el('div', { class: 'rem-item rem-auto' }, [
+          el('span', { class: 'rem-ico rem-auto-ico', text: '🚗' }),
+          el('a', { class: 'rem-item-body', href: '#/vehiculo/' + v.id }, [
+            el('div', { class: 'rem-item-title' }, [
+              el('span', { class: 'rem-item-name', text: store.vehicleName(v) }),
+              (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consig.', 'pill-warn') : null
+            ]),
+            el('div', { class: 'rem-item-meta' }, [
+              el('span', { text: 'Inversión ' + fmt.money(m.costoTotalARS) + ' · Valor estimado ' + fmt.money(m.estimadoARS) }),
+              el('span', { class: dif >= 0 ? 'pos' : 'neg', text: '  ' + (dif >= 0 ? '+' : '') + fmt.money(dif) })
+            ])
+          ])
+        ]);
+      })));
     }
     wrap.appendChild(stockCard);
 
@@ -976,6 +979,20 @@
       }
     });
 
+    // Teléfono tocable: llamar siempre que haya número; WhatsApp además
+    // cuando parece un celular argentino (10 dígitos, área sin 0/15 — el
+    // mismo formato en el que ya se cargan los teléfonos en la app).
+    function phoneActions(telefono) {
+      if (!telefono) return null;
+      var digits = telefono.replace(/\D/g, '');
+      if (!digits) return null;
+      var kids = [el('a', { class: 'icon-btn phone-action', href: 'tel:' + digits, title: 'Llamar', onclick: function (e) { e.stopPropagation(); }, html: '📞' })];
+      if (digits.length === 10) {
+        kids.push(el('a', { class: 'icon-btn phone-action', href: 'https://wa.me/549' + digits, target: '_blank', rel: 'noopener', title: 'WhatsApp', onclick: function (e) { e.stopPropagation(); }, html: '💬' }));
+      }
+      return el('span', { class: 'phone-actions' }, kids);
+    }
+
     function group(title, obj, emptyMsg) {
       var keys = Object.keys(obj);
       var card = el('div', { class: 'card' });
@@ -988,6 +1005,7 @@
           el('summary', {}, [
             el('strong', { text: c.nombre }),
             c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
+            phoneActions(c.telefono),
             el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
             el('span', { class: 'muted', text: fmt.money(total) })
           ]),
@@ -1079,26 +1097,31 @@
         el('div', {}, [el('span', { text: 'Falta' }), el('strong', { class: t.falta ? 'neg' : '', text: fmt.money(t.falta) })]),
         t.vencido ? el('div', {}, [el('span', { text: 'Vencido' }), el('strong', { class: 'neg', text: fmt.money(t.vencido) })]) : null
       ]));
-      var table = el('table', { class: 'data-table' });
-      table.appendChild(el('thead', {}, el('tr', {}, ['Auto', 'Cuota', 'Monto', 'Vence', 'Estado', ''].map(function (h) { return el('th', { text: h }); }))));
-      var tb = el('tbody');
-      list.forEach(function (it) {
+      // Tarjetas (mismo componente que ya usa Alertas para cuotas próximas:
+      // .rem-item.rem-auto) en vez de una tabla — así la acción principal
+      // ("Pagué"/"Me pagaron") siempre queda visible, sin scroll horizontal.
+      var ico = tipo === 'pagar' ? '💳' : '💰';
+      card.appendChild(el('div', { class: 'rem-list' }, list.map(function (it) {
         var c = it.cuota;
-        var pillCls = (it.estado === 'pagada' || it.estado === 'cobrada') ? 'pill-ok' : (it.estado === 'vencida' ? 'pill-danger' : 'pill-warn');
+        var done = it.estado === 'pagada' || it.estado === 'cobrada';
+        var pillCls = done ? 'pill-ok' : (it.estado === 'vencida' ? 'pill-danger' : 'pill-warn');
         var pillTxt = it.estado.charAt(0).toUpperCase() + it.estado.slice(1);
-        tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.router.go('vehiculo/' + it.vehicle.id + '?tab=economia'); } }, [
-          el('td', { text: store.vehicleName(it.vehicle) }),
-          el('td', { text: c.numero }),
-          el('td', { text: fmt.money(c.monto, it.moneda) }),
-          el('td', { text: fmt.date(it.vencimiento) }),
-          el('td', {}, ui.pill(pillTxt, pillCls)),
-          el('td', {}, (it.estado !== 'pagada' && it.estado !== 'cobrada')
-            ? el('button', { class: 'btn btn-sm btn-primary', text: tipo === 'pagar' ? 'Pagué' : 'Me pagaron', onclick: function (e) { e.stopPropagation(); if (tipo === 'pagar') store.pagarCuota(it.vehicle.id, c.id, hoy); else store.cobrarCuotaVenta(it.vehicle.id, c.id, hoy); ui.toast('Listo', 'success'); } })
-            : null)
-        ]));
-      });
-      table.appendChild(tb);
-      card.appendChild(el('div', { class: 'table-wrap' }, table));
+        return el('div', { class: 'rem-item rem-auto' + (it.estado === 'vencida' ? ' rem-overdue' : '') + (done ? ' is-done' : '') }, [
+          el('span', { class: 'rem-ico rem-auto-ico', text: ico }),
+          el('a', { class: 'rem-item-body', href: '#/vehiculo/' + it.vehicle.id + '?tab=economia' }, [
+            el('div', { class: 'rem-item-title' }, [
+              el('span', { class: 'rem-item-name', text: store.vehicleName(it.vehicle) + ' · Cuota ' + c.numero }),
+              ui.pill(pillTxt, pillCls)
+            ]),
+            el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, it.moneda) + ' · Vence ' + fmt.date(it.vencimiento) })
+          ]),
+          done ? null : el('button', { class: 'btn btn-sm btn-primary', text: tipo === 'pagar' ? 'Pagué' : 'Me pagaron', onclick: function (e) {
+            e.preventDefault(); e.stopPropagation();
+            if (tipo === 'pagar') store.pagarCuota(it.vehicle.id, c.id, hoy); else store.cobrarCuotaVenta(it.vehicle.id, c.id, hoy);
+            ui.toast('Listo', 'success');
+          } })
+        ]);
+      })));
       return card;
     }
     function draw() {
@@ -1132,21 +1155,19 @@
       wrap.appendChild(el('div', { class: 'card' }, [ui.emptyState('Cargá el alquiler, los sueldos, el seguro de la flota… así la ganancia del negocio es la de verdad.', '🏢')]));
       root.appendChild(wrap); return;
     }
-    var table = el('table', { class: 'data-table' });
-    table.appendChild(el('thead', {}, el('tr', {}, ['Concepto', 'Categoría', 'Monto', 'Cada cuánto', 'Desde', ''].map(function (h) { return el('th', { text: h }); }))));
-    var tb = el('tbody');
-    list.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).forEach(function (f) {
-      tb.appendChild(el('tr', { class: 'clickable-row', onclick: function () { App.forms.fixedExpenseForm(f); } }, [
-        el('td', { text: f.concepto }),
-        el('td', { text: store.categoriaLabel(f.categoria) }),
-        el('td', { text: fmt.money(f.monto, f.moneda) }),
-        el('td', { text: f.frecuencia === 'mensual' ? 'Todos los meses' : 'Una vez' }),
-        el('td', { text: fmt.date(f.fecha) + (f.hasta ? ' → ' + fmt.date(f.hasta) : '') }),
-        el('td', {}, el('button', { class: 'mini-btn', text: '✎', title: 'Editar', onclick: function (e) { e.stopPropagation(); App.forms.fixedExpenseForm(f); } }))
-      ]));
-    });
-    table.appendChild(tb);
-    wrap.appendChild(el('div', { class: 'card' }, [el('div', { class: 'table-wrap' }, table)]));
+    // Tarjetas en vez de tabla (mismo componente que Cuotas/Alertas): toda
+    // la fila es tocable y abre la edición, sin scroll horizontal en mobile.
+    var listWrap = el('div', { class: 'rem-list' }, list.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).map(function (f) {
+      var meta = fmt.money(f.monto, f.moneda) + ' · ' + store.categoriaLabel(f.categoria) + ' · ' + (f.frecuencia === 'mensual' ? 'Todos los meses' : 'Una vez');
+      return el('div', { class: 'rem-item rem-auto' }, [
+        el('span', { class: 'rem-ico rem-auto-ico', text: '📌' }),
+        el('a', { class: 'rem-item-body', href: '#', onclick: function (e) { e.preventDefault(); App.forms.fixedExpenseForm(f); } }, [
+          el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: f.concepto })]),
+          el('div', { class: 'rem-item-meta', text: meta + ' · ' + fmt.date(f.fecha) + (f.hasta ? ' → ' + fmt.date(f.hasta) : '') })
+        ])
+      ]);
+    }));
+    wrap.appendChild(el('div', { class: 'card' }, [listWrap]));
     root.appendChild(wrap);
   }
 

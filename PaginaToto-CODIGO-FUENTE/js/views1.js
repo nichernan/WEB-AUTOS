@@ -548,25 +548,22 @@
         m.proximaCuota ? el('div', {}, [el('span', { text: 'Próxima cuota' }), el('strong', { text: fmt.date(m.proximaCuota.vencimiento) })]) : null,
         m.cuotasVencidasARS ? el('div', {}, [el('span', { text: 'Vencidas' }), el('strong', { class: 'neg', text: fmt.money(m.cuotasVencidasARS) })]) : null
       ]));
-      var table = el('table', { class: 'data-table' });
-      table.appendChild(el('thead', {}, el('tr', {}, ['#', 'Monto', 'Vencimiento', 'Estado', 'Pagada el', ''].map(function (h) { return el('th', { text: h }); }))));
-      var tb = el('tbody');
       var hoy = store.todayISO();
-      p.cuotas.forEach(function (c) {
+      out.push(el('div', { class: 'rem-list' }, p.cuotas.map(function (c) {
         var vencida = !c.pagada && c.vencimiento && c.vencimiento < hoy;
-        tb.appendChild(el('tr', {}, [
-          el('td', { text: c.numero }),
-          el('td', { text: fmt.money(c.monto, p.moneda) }),
-          el('td', { text: fmt.date(c.vencimiento) }),
-          el('td', {}, c.pagada ? ui.pill('Pagada', 'pill-ok') : (vencida ? ui.pill('Vencida', 'pill-danger') : ui.pill('Pendiente', 'pill-warn'))),
-          el('td', { text: c.fechaPago ? fmt.date(c.fechaPago) : '—' }),
-          el('td', {}, c.pagada
-            ? el('button', { class: 'mini-btn', text: 'Desmarcar', onclick: function () { store.desmarcarCuota(v.id, c.id); App.router.render(); } })
-            : el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar pago', onclick: function () { pagarCuotaPrompt(v.id, c); } }))
-        ]));
-      });
-      table.appendChild(tb);
-      out.push(el('div', { class: 'table-wrap' }, table));
+        var pillTxt = c.pagada ? 'Pagada' : (vencida ? 'Vencida' : 'Pendiente');
+        var pillCls = c.pagada ? 'pill-ok' : (vencida ? 'pill-danger' : 'pill-warn');
+        return el('div', { class: 'rem-item rem-auto' + (vencida ? ' rem-overdue' : '') + (c.pagada ? ' is-done' : '') }, [
+          el('span', { class: 'rem-ico rem-auto-ico', text: '💳' }),
+          el('div', { class: 'rem-item-body' }, [
+            el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: 'Cuota ' + c.numero }), ui.pill(pillTxt, pillCls)]),
+            el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, p.moneda) + ' · Vence ' + fmt.date(c.vencimiento) + (c.fechaPago ? ' · Pagada el ' + fmt.date(c.fechaPago) : '') })
+          ]),
+          c.pagada
+            ? el('button', { class: 'btn btn-sm btn-ghost', text: 'Desmarcar', onclick: function () { store.desmarcarCuota(v.id, c.id); App.router.render(); } })
+            : el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar pago', onclick: function () { pagarCuotaPrompt(v.id, c); } })
+        ]);
+      })));
     }
     return out;
   }
@@ -605,22 +602,16 @@
       el('div', { class: 'invest-total' }, [el('span', { text: '= Inversión total' }), el('strong', { text: fmt.money(m.inversionARS) })])
     ]));
     if (!(v.expenses || []).length) { out.push(ui.emptyState('Sin gastos registrados todavía.', '💸')); return out; }
-    var table = el('table', { class: 'data-table' });
-    table.appendChild(el('thead', {}, el('tr', {}, ['Fecha', 'Monto', 'Observación', ''].map(function (h) { return el('th', { text: h }); }))));
-    var tb = el('tbody');
-    v.expenses.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).forEach(function (e) {
-      tb.appendChild(el('tr', {}, [
-        el('td', { text: fmt.date(e.fecha) }),
-        el('td', { text: fmt.money(e.monto, e.moneda) }),
-        el('td', { class: 'obs-cell', text: e.observacion || '—' }),
-        el('td', {}, el('div', { class: 'row-btns' }, [
-          el('button', { class: 'mini-btn', text: '✎', title: 'Editar', onclick: function () { App.forms.expenseForm(v.id, e); } }),
-          el('button', { class: 'mini-btn', text: '✕', title: 'Eliminar', onclick: function () { ui.confirm({ message: '¿Eliminar este gasto?', danger: true }).then(function (ok) { if (ok) { store.removeExpense(v.id, e.id); App.router.render(); } }); } })
-        ]))
-      ]));
-    });
-    table.appendChild(tb);
-    out.push(el('div', { class: 'table-wrap' }, table));
+    out.push(el('div', { class: 'rem-list' }, v.expenses.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).map(function (e) {
+      return el('div', { class: 'rem-item rem-auto' }, [
+        el('span', { class: 'rem-ico rem-auto-ico', text: '💸' }),
+        el('a', { class: 'rem-item-body', href: '#', onclick: function (ev) { ev.preventDefault(); App.forms.expenseForm(v.id, e); } }, [
+          el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: fmt.money(e.monto, e.moneda) })]),
+          el('div', { class: 'rem-item-meta', text: fmt.date(e.fecha) + (e.observacion ? ' · ' + e.observacion : '') })
+        ]),
+        el('button', { class: 'icon-btn', html: '&times;', title: 'Eliminar', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); ui.confirm({ message: '¿Eliminar este gasto?', danger: true }).then(function (ok) { if (ok) { store.removeExpense(v.id, e.id); App.router.render(); } }); } })
+      ]);
+    })));
     return out;
   }
 
@@ -661,25 +652,22 @@
         f.entrega ? el('div', {}, [el('span', { text: 'Anticipo' }), el('strong', { text: fmt.money(f.entrega, f.moneda) })]) : null,
         m.financVencidasARS ? el('div', {}, [el('span', { text: 'Vencidas' }), el('strong', { class: 'neg', text: fmt.money(m.financVencidasARS) })]) : null
       ]));
-      var ftable = el('table', { class: 'data-table' });
-      ftable.appendChild(el('thead', {}, el('tr', {}, ['#', 'Monto', 'Vencimiento', 'Estado', 'Cobrada el', ''].map(function (h) { return el('th', { text: h }); }))));
-      var ftb = el('tbody');
       var fhoy = store.todayISO();
-      (f.cuotas || []).forEach(function (c) {
+      out.push(el('div', { class: 'rem-list' }, (f.cuotas || []).map(function (c) {
         var venc = !c.cobrada && c.vencimiento && c.vencimiento < fhoy;
-        ftb.appendChild(el('tr', {}, [
-          el('td', { text: c.numero }),
-          el('td', { text: fmt.money(c.monto, f.moneda) }),
-          el('td', { text: fmt.date(c.vencimiento) }),
-          el('td', {}, c.cobrada ? ui.pill('Cobrada', 'pill-ok') : (venc ? ui.pill('Vencida', 'pill-danger') : ui.pill('Pendiente', 'pill-warn'))),
-          el('td', { text: c.fechaCobro ? fmt.date(c.fechaCobro) : '—' }),
-          el('td', {}, c.cobrada
-            ? el('button', { class: 'mini-btn', text: 'Desmarcar', onclick: function () { store.descobrarCuotaVenta(v.id, c.id); App.router.render(); } })
-            : el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar cobro', onclick: function () { cobrarCuotaPrompt(v.id, c); } }))
-        ]));
-      });
-      ftable.appendChild(ftb);
-      out.push(el('div', { class: 'table-wrap' }, ftable));
+        var pillTxt = c.cobrada ? 'Cobrada' : (venc ? 'Vencida' : 'Pendiente');
+        var pillCls = c.cobrada ? 'pill-ok' : (venc ? 'pill-danger' : 'pill-warn');
+        return el('div', { class: 'rem-item rem-auto' + (venc ? ' rem-overdue' : '') + (c.cobrada ? ' is-done' : '') }, [
+          el('span', { class: 'rem-ico rem-auto-ico', text: '💰' }),
+          el('div', { class: 'rem-item-body' }, [
+            el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: 'Cuota ' + c.numero }), ui.pill(pillTxt, pillCls)]),
+            el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, f.moneda) + ' · Vence ' + fmt.date(c.vencimiento) + (c.fechaCobro ? ' · Cobrada el ' + fmt.date(c.fechaCobro) : '') })
+          ]),
+          c.cobrada
+            ? el('button', { class: 'btn btn-sm btn-ghost', text: 'Desmarcar', onclick: function () { store.descobrarCuotaVenta(v.id, c.id); App.router.render(); } })
+            : el('button', { class: 'btn btn-sm btn-primary', text: 'Registrar cobro', onclick: function () { cobrarCuotaPrompt(v.id, c); } })
+        ]);
+      })));
     }
 
     if (s.tradeIn) {
