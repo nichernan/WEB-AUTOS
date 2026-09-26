@@ -127,12 +127,17 @@
 
     // Topbar
     searchEl = ui.input({ placeholder: 'Buscar auto por marca, modelo, año, patente...', class: 'input topbar-search' });
+    // El buscador de la barra superior comparte filters.q con la lista de
+    // vehículos (#/vehiculos, App.filters en views1.js) — es esa pantalla la
+    // que efectivamente lo usa para filtrar. Antes redirigía a "#/" (Inicio),
+    // que no lee filters.q, así que buscar desde cualquier lado no mostraba
+    // nada. Corregido para ir siempre a la lista, que sí lo filtra.
     searchEl.addEventListener('input', function () {
       App.filters.q = searchEl.value;
-      if (currentPath().name !== '') location.hash = '#/';
+      if (currentPath().name !== 'vehiculos') location.hash = '#/vehiculos';
       else App.router.render();
     });
-    searchEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { location.hash = '#/'; } });
+    searchEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { location.hash = '#/vehiculos'; } });
 
     var topbar = el('header', { class: 'topbar' }, [
       el('button', { class: 'icon-btn menu-toggle', html: '☰', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }),

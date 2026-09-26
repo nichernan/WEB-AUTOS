@@ -6425,7 +6425,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       content.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
         miniStat('Ventas', fmt.num(r.ventasCount)),
         miniStat('Ganancia', fmt.money(r.ganancias), r.ganancias >= 0 ? 'pos' : 'neg'),
-        miniStat('Gastos', fmt.money(r.gastos)),
+        miniStat('Gastos', fmt.money(r.gastos + r.gastosFijos)),
         miniStat('Resultado', fmt.money(r.resultadoNeto), r.resultadoNeto >= 0 ? 'pos' : 'neg')
       ]));
 
@@ -7082,7 +7082,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       wrap.appendChild(el('div', { class: 'card trash-item' }, [
         el('div', { class: 'trash-info' }, [
           el('strong', { text: store.vehicleName(v) }),
-          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(new Date(v.deletedAt).toISOString().slice(0, 10)) })
+          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(isoOf(new Date(v.deletedAt))) })
         ]),
         el('div', { class: 'row-btns' }, [
           el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () { store.restoreVehicle(v.id); ui.toast('Vehículo restaurado', 'success'); App.router.render(); } }),
@@ -7702,12 +7702,17 @@ details.card[open] > summary { margin-bottom: 10px; }
 
     // Topbar
     searchEl = ui.input({ placeholder: 'Buscar auto por marca, modelo, año, patente...', class: 'input topbar-search' });
+    // El buscador de la barra superior comparte filters.q con la lista de
+    // vehículos (#/vehiculos, App.filters en views1.js) — es esa pantalla la
+    // que efectivamente lo usa para filtrar. Antes redirigía a "#/" (Inicio),
+    // que no lee filters.q, así que buscar desde cualquier lado no mostraba
+    // nada. Corregido para ir siempre a la lista, que sí lo filtra.
     searchEl.addEventListener('input', function () {
       App.filters.q = searchEl.value;
-      if (currentPath().name !== '') location.hash = '#/';
+      if (currentPath().name !== 'vehiculos') location.hash = '#/vehiculos';
       else App.router.render();
     });
-    searchEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { location.hash = '#/'; } });
+    searchEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { location.hash = '#/vehiculos'; } });
 
     var topbar = el('header', { class: 'topbar' }, [
       el('button', { class: 'icon-btn menu-toggle', html: '☰', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }),

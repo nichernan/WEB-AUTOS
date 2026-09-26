@@ -528,7 +528,7 @@
       content.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
         miniStat('Ventas', fmt.num(r.ventasCount)),
         miniStat('Ganancia', fmt.money(r.ganancias), r.ganancias >= 0 ? 'pos' : 'neg'),
-        miniStat('Gastos', fmt.money(r.gastos)),
+        miniStat('Gastos', fmt.money(r.gastos + r.gastosFijos)),
         miniStat('Resultado', fmt.money(r.resultadoNeto), r.resultadoNeto >= 0 ? 'pos' : 'neg')
       ]));
 
@@ -1185,7 +1185,7 @@
       wrap.appendChild(el('div', { class: 'card trash-item' }, [
         el('div', { class: 'trash-info' }, [
           el('strong', { text: store.vehicleName(v) }),
-          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(new Date(v.deletedAt).toISOString().slice(0, 10)) })
+          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(isoOf(new Date(v.deletedAt))) })
         ]),
         el('div', { class: 'row-btns' }, [
           el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () { store.restoreVehicle(v.id); ui.toast('Vehículo restaurado', 'success'); App.router.render(); } }),
