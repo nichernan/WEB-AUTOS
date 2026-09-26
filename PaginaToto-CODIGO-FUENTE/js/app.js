@@ -33,6 +33,7 @@
   // Economía, Cuotas ni Alertas, que ya están ahí.
   var MENU_POPOVER = [
     { path: 'historial', icon: '📋', label: 'Historial' },
+    { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
     { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
   ];
 
