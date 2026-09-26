@@ -28,6 +28,15 @@
     { path: '__menu', icon: '☰', label: 'Menú' }
   ];
 
+  // "☰ Menú" es un popover chico con solo las secciones que NO tienen
+  // botón propio en la barra inferior — para no duplicar Vehículos,
+  // Economía, Cuotas ni Alertas, que ya están ahí.
+  var MENU_POPOVER = [
+    { path: 'historial', icon: '📋', label: 'Historial' },
+    { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
+    { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
+  ];
+
   // Rutas que ya no tienen ítem propio en el menú, pero se muestran como
   // parte de otra sección (para que ese ítem del menú quede marcado activo).
   var SUBROUTE_OF = {
@@ -60,6 +69,30 @@
       e.preventDefault();
       App.router.render();
     }
+  }
+
+  // "☰ Menú" de la barra inferior: popover chico (no la pantalla completa del
+  // sidebar) con las secciones que no tienen botón propio abajo. Mismo
+  // patrón de interacción que el menú "···" de la ficha del vehículo
+  // (click afuera cierra, elegir una opción cierra y navega).
+  function bottomMenuPopover(triggerKids) {
+    var open = false;
+    var btn = el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', 'aria-haspopup': 'true' }, triggerKids);
+    var menu = el('div', { class: 'bottomnav-menu', hidden: true }, MENU_POPOVER.map(function (n) {
+      return el('a', {
+        class: 'bottomnav-menu-item', href: '#/' + n.path, dataset: { path: n.path },
+        onclick: function (e) { closeMenu(); handleNavClick(e, n.path); }
+      }, [
+        el('span', { class: 'bottomnav-menu-ico', text: n.icon }),
+        el('span', { text: n.label })
+      ]);
+    }));
+    function onDocClick(e) { if (!wrap.contains(e.target)) closeMenu(); }
+    function closeMenu() { if (!open) return; open = false; menu.hidden = true; document.removeEventListener('mousedown', onDocClick); }
+    function openMenu() { open = true; menu.hidden = false; document.addEventListener('mousedown', onDocClick); }
+    btn.addEventListener('click', function (e) { e.stopPropagation(); if (open) closeMenu(); else openMenu(); });
+    var wrap = el('div', { class: 'bottomnav-item-wrap' }, [btn, menu]);
+    return wrap;
   }
 
   function navItems() {
@@ -119,7 +152,7 @@
         n.path === 'alertas' ? el('span', { class: 'bottomnav-badge', id: 'bottomnav-alert-badge', hidden: true }) : null
       ];
       if (n.path === '__menu') {
-        return el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }, kids);
+        return bottomMenuPopover(kids);
       }
       return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, kids);
     }));

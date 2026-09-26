@@ -785,6 +785,25 @@ details.card[open] > summary { margin-bottom: 10px; }
   .main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
   .toast-wrap { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 
+  /* "☰ Menú": popover chico anclado arriba del botón (no una pantalla
+     nueva ni el drawer lateral completo) */
+  .bottomnav-item-wrap { flex: 1; display: flex; position: relative; }
+  .bottomnav-menu {
+    position: absolute; right: 2px; bottom: calc(100% + 10px); z-index: 65;
+    min-width: 216px; max-width: calc(100vw - 24px);
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    border-radius: 14px; box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, .28));
+    display: flex; flex-direction: column; padding: 6px; gap: 2px;
+  }
+  .bottomnav-menu-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px; border-radius: 10px; font-size: .92rem; font-weight: 600;
+    color: var(--c-text); text-decoration: none; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bottomnav-menu-item:hover, .bottomnav-menu-item:active { background: var(--c-surface-2); }
+  .bottomnav-menu-ico { font-size: 1.15rem; width: 22px; text-align: center; flex-shrink: 0; }
+
   /* --- Controles más grandes y sin zoom al tocarlos (iOS) --- */
   .input, .select, .textarea { font-size: 16px; padding: 11px 12px; }
   .btn { padding: 11px 16px; }
@@ -7577,6 +7596,15 @@ details.card[open] > summary { margin-bottom: 10px; }
     { path: '__menu', icon: '☰', label: 'Menú' }
   ];
 
+  // "☰ Menú" es un popover chico con solo las secciones que NO tienen
+  // botón propio en la barra inferior — para no duplicar Vehículos,
+  // Economía, Cuotas ni Alertas, que ya están ahí.
+  var MENU_POPOVER = [
+    { path: 'historial', icon: '📋', label: 'Historial' },
+    { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
+    { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
+  ];
+
   // Rutas que ya no tienen ítem propio en el menú, pero se muestran como
   // parte de otra sección (para que ese ítem del menú quede marcado activo).
   var SUBROUTE_OF = {
@@ -7609,6 +7637,30 @@ details.card[open] > summary { margin-bottom: 10px; }
       e.preventDefault();
       App.router.render();
     }
+  }
+
+  // "☰ Menú" de la barra inferior: popover chico (no la pantalla completa del
+  // sidebar) con las secciones que no tienen botón propio abajo. Mismo
+  // patrón de interacción que el menú "···" de la ficha del vehículo
+  // (click afuera cierra, elegir una opción cierra y navega).
+  function bottomMenuPopover(triggerKids) {
+    var open = false;
+    var btn = el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', 'aria-haspopup': 'true' }, triggerKids);
+    var menu = el('div', { class: 'bottomnav-menu', hidden: true }, MENU_POPOVER.map(function (n) {
+      return el('a', {
+        class: 'bottomnav-menu-item', href: '#/' + n.path, dataset: { path: n.path },
+        onclick: function (e) { closeMenu(); handleNavClick(e, n.path); }
+      }, [
+        el('span', { class: 'bottomnav-menu-ico', text: n.icon }),
+        el('span', { text: n.label })
+      ]);
+    }));
+    function onDocClick(e) { if (!wrap.contains(e.target)) closeMenu(); }
+    function closeMenu() { if (!open) return; open = false; menu.hidden = true; document.removeEventListener('mousedown', onDocClick); }
+    function openMenu() { open = true; menu.hidden = false; document.addEventListener('mousedown', onDocClick); }
+    btn.addEventListener('click', function (e) { e.stopPropagation(); if (open) closeMenu(); else openMenu(); });
+    var wrap = el('div', { class: 'bottomnav-item-wrap' }, [btn, menu]);
+    return wrap;
   }
 
   function navItems() {
@@ -7668,7 +7720,7 @@ details.card[open] > summary { margin-bottom: 10px; }
         n.path === 'alertas' ? el('span', { class: 'bottomnav-badge', id: 'bottomnav-alert-badge', hidden: true }) : null
       ];
       if (n.path === '__menu') {
-        return el('button', { class: 'bottomnav-item', type: 'button', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }, kids);
+        return bottomMenuPopover(kids);
       }
       return el('a', { class: 'bottomnav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, kids);
     }));
