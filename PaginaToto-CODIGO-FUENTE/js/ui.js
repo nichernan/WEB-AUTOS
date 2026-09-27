@@ -288,6 +288,61 @@
     }).join('\r\n');
   }
 
+  /* ------------- Enter avanza al siguiente campo (como Tab) ----------- */
+  // Solución única y centralizada para toda la app: un solo listener
+  // global en document, en vez de repetir "Enter -> siguiente campo" en
+  // cada formulario. Enter en un input/select se comporta como Tab: busca
+  // el siguiente campo visible y habilitado dentro del mismo formulario
+  // (la tarjeta ".modal" si está en un modal, o la página ".page" si no)
+  // y le da foco. Nunca envía, guarda ni cierra nada — solo mueve el foco.
+  // Recalcula la lista de campos en cada Enter (sin cachear), así que los
+  // campos que aparecen/desaparecen (p.ej. "+ Más datos", "Mixto") entran
+  // o salen solos de la navegación sin código extra por formulario.
+  //
+  // Excepciones respetadas a propósito (no se tocan):
+  // - textarea: Enter sigue siendo salto de línea.
+  // - <button>: Enter lo sigue ejecutando (no se intercepta en absoluto).
+  // - inputs dentro de un <form> real (login/alta de usuario en auth.js,
+  //   único caso en la app): se deja el submit nativo tal cual estaba.
+  // - el buscador de la barra superior (.topbar-search-wrap): ya tiene su
+  //   propio Enter para ir a la lista filtrada; no se lo pisamos.
+  var ENTER_NON_FIELD_TYPES = { button: true, submit: true, reset: true, file: true, hidden: true, image: true };
+  function isNavigableField(n) {
+    if (!n || !n.tagName) return false;
+    var tag = n.tagName.toLowerCase();
+    if (tag === 'select') return !n.disabled;
+    if (tag !== 'input') return false;
+    if (ENTER_NON_FIELD_TYPES[(n.type || '').toLowerCase()]) return false;
+    return !n.disabled && !n.readOnly;
+  }
+  function isVisibleField(n) { return n.offsetParent !== null; }
+  function nextNavigableField(scope, current) {
+    var all = scope.querySelectorAll('input, select');
+    var candidates = [];
+    for (var i = 0; i < all.length; i++) {
+      if (isNavigableField(all[i]) && isVisibleField(all[i])) candidates.push(all[i]);
+    }
+    var idx = candidates.indexOf(current);
+    if (idx === -1 || idx === candidates.length - 1) return null;
+    return candidates[idx + 1];
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    var t = e.target;
+    if (!t || !t.tagName) return;
+    var tag = t.tagName.toLowerCase();
+    if (tag === 'textarea') return;
+    if (tag === 'button' || (tag === 'input' && ENTER_NON_FIELD_TYPES[(t.type || '').toLowerCase()])) return;
+    if (t.closest('form')) return;
+    if (t.closest('.topbar-search-wrap')) return;
+    if (!isNavigableField(t)) return;
+    var scope = t.closest('.modal') || t.closest('.page') || document.body;
+    var next = nextNavigableField(scope, t);
+    e.preventDefault();
+    if (next) next.focus();
+  });
+
   /* ------------------------------- Export ---------------------------- */
   function emptyState(msg, icon) {
     return el('div', { class: 'empty' }, [

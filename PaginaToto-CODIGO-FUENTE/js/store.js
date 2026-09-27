@@ -498,7 +498,11 @@
       financiacion: financiacion,
       comision: normComision(sale.comision),
       diferencia: sale.diferencia && sale.diferencia.monto != null
-        ? { monto: num(sale.diferencia.monto), moneda: sale.diferencia.moneda || 'ARS' }
+        ? {
+            monto: num(sale.diferencia.monto), moneda: sale.diferencia.moneda || 'ARS',
+            montoEfectivo: num(sale.diferencia.montoEfectivo) || 0,
+            montoTransferencia: num(sale.diferencia.montoTransferencia) || 0
+          }
         : null
     };
     v.estado = 'vendido';

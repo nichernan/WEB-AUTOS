@@ -51,26 +51,37 @@
         render();
       }
     });
+    // Tarjeta simple por cuota (no fila de tabla contable): número, monto,
+    // vencimiento editables, y un solo botón de estado. La fecha de
+    // pago/cobro ya NO se pide a mano — al marcar la cuota se guarda sola
+    // la fecha de hoy (store.todayISO()), y al desmarcarla se borra.
     function render() {
       ui.clear(box);
       if (!cuotas.length) { box.appendChild(el('p', { class: 'form-help', text: 'Todavía no generaste cuotas. Poné la cantidad, el monto y desde cuándo, y tocá "Generar cuotas".' })); return; }
       var totalEl = el('div', { class: 'cuota-total' });
       cuotas.forEach(function (c, i) {
-        var fM = ui.moneyInput({ value: c.monto, style: 'max-width:130px' });
+        var fM = ui.moneyInput({ value: c.monto });
         fM.addEventListener('input', function () { c.monto = fM.value; upd(); });
-        var fV = ui.input({ type: 'date', value: c.vencimiento, style: 'max-width:150px' });
+        var fV = ui.input({ type: 'date', value: c.vencimiento });
         fV.addEventListener('input', function () { c.vencimiento = fV.value; });
-        var cb = el('input', { type: 'checkbox' }); cb.checked = !!c[kDone];
-        var fFP = ui.input({ type: 'date', value: c[kDate] || store.todayISO(), style: 'max-width:140px' });
-        fFP.disabled = !c[kDone];
-        cb.addEventListener('change', function () { c[kDone] = cb.checked; fFP.disabled = !cb.checked; c[kDate] = cb.checked ? fFP.value : null; });
-        fFP.addEventListener('input', function () { c[kDate] = fFP.value; });
-        box.appendChild(el('div', { class: 'cuota-row' }, [
-          el('span', { class: 'cuota-num', text: 'Cuota ' + (i + 1) }),
-          fM, fV,
-          el('label', { class: 'check-inline' }, [cb, el('span', { text: lblDone })]),
-          fFP,
-          el('button', { type: 'button', class: 'mini-btn', text: '✕', title: 'Quitar', onclick: function () { cuotas.splice(i, 1); render(); } })
+        var done = !!c[kDone];
+        var stateBtn = el('button', {
+          type: 'button',
+          class: 'btn btn-sm ' + (done ? 'btn-ghost' : 'btn-primary'),
+          text: done ? ('✓ ' + lblDone) : ('○ Marcar como ' + lblDone.toLowerCase()),
+          onclick: function () {
+            c[kDone] = !c[kDone];
+            c[kDate] = c[kDone] ? store.todayISO() : null;
+            render();
+          }
+        });
+        box.appendChild(el('div', { class: 'card cuota-card' }, [
+          el('div', { class: 'card-head' }, [
+            el('span', { class: 'cuota-num', text: 'Cuota ' + (i + 1) }),
+            el('button', { type: 'button', class: 'mini-btn', text: '✕', title: 'Quitar', onclick: function () { cuotas.splice(i, 1); render(); } })
+          ]),
+          el('div', { class: 'grid-2' }, [ui.field('Monto', fM), ui.field('Vencimiento', fV)]),
+          stateBtn
         ]));
       });
       box.appendChild(totalEl);
@@ -125,7 +136,7 @@
     var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
     var precio = ui.money2('vfCompra', p.precio || '', p.moneda || 'ARS');
     var fCotiz = ui.moneyInput({ value: p.cotizacionUSD || '', placeholder: '1500' });
-    var cotizField = ui.field('Cotización del dólar al momento de la compra', fCotiz, 'Se guarda como valor histórico y no cambia luego');
+    var cotizField = ui.field('Cotización USD', fCotiz, 'Valor del dólar al momento de la compra');
     function syncCotiz() { cotizField.hidden = precio.moneda.value !== 'ARS'; }
     precio.moneda.addEventListener('change', syncCotiz);
     syncCotiz();
@@ -153,13 +164,13 @@
     function sync() { mixtoBox.hidden = fForma.value !== 'mixto'; cuotas.section.hidden = fForma.value !== 'cuotas'; }
     fForma.addEventListener('change', sync);
     sync(); checkMixto();
-    // Fecha de compra, cotización del dólar y proveedor/vendedor son datos
-    // secundarios: no hace falta tocarlos para registrar rápido un vehículo
-    // (la fecha ya queda en el día de hoy y se guarda igual aunque este
-    // bloque esté cerrado), así que quedan detrás de "+ Más datos" (mismo
-    // patrón que Alertas).
-    var provBox = el('div', { hidden: !(pr.nombre || pr.telefono || p.cotizacionUSD) }, [
-      el('div', { class: 'grid-2' }, [ui.field('Fecha de compra', fFecha), cotizField]),
+    // Cotización USD queda siempre visible junto al precio de compra (no es
+    // un dato secundario: hace falta para poder comparar en dólares). Fecha
+    // de compra y proveedor/vendedor sí son secundarios — se completan solos
+    // o se cargan después — y quedan detrás de "+ Más datos" (mismo patrón
+    // que Alertas).
+    var provBox = el('div', { hidden: !(pr.nombre || pr.telefono) }, [
+      ui.field('Fecha de compra', fFecha),
       el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)])
     ]);
     var provToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos', onclick: function () {
@@ -167,7 +178,7 @@
       provToggle.textContent = provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos';
     } });
     var node = el('div', { class: 'form-grid' }, [
-      ui.field('Precio de compra', precio.wrap),
+      el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), cotizField]),
       ui.field('Forma de pago', fForma),
       mixtoBox,
       cuotas.section,
@@ -297,30 +308,37 @@
       ]);
     }
 
-    // Lo esencial para empezar: Marca, Modelo, Año y el Origen (arriba,
-    // siempre visible). Patente/Km/Combustible/Caja/Versión, Estado,
-    // Documentación, precio pretendido y observaciones son datos que se
-    // pueden cargar después — quedan agrupados detrás de un solo
-    // "+ Más datos" (mismo patrón ya usado en Alertas), sin eliminar
-    // ningún campo.
-    var hayDatosExtra = !!(v.patente || v.km != null || v.combustible || v.caja || v.version
-      || (v.estado && v.estado !== 'stock') || (v.documentacion && v.documentacion !== 'pendiente')
-      || v.precioPretendido || v.observaciones);
-    var masDatosBox = el('div', { hidden: !hayDatosExtra }, [
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Más datos del vehículo' }),
-        el('div', { class: 'grid-2' }, [
-          ui.field('Patente', fPatente), ui.field('Kilometraje', fKm),
-          ui.field('Combustible', fComb), ui.field('Tipo de caja', fCaja),
-          ui.field('Versión', fVersion), ui.field('Estado', fEstado),
-          ui.field('Documentación', fDoc)
-        ])
-      ]),
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Información adicional' }),
-        ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock'),
-        ui.field('Observaciones', fObs)
+    // Marca/Modelo/Año (obligatorios) y Versión quedan siempre visibles en
+    // "Datos de versión". Patente/Km/Combustible/Caja/Estado/Documentación
+    // son secundarios para cargar rápido: quedan detrás de su propio
+    // "＋ Más datos", pegado justo debajo de "Datos de versión" y antes de
+    // "Origen del vehículo" — igual que ya empieza abierto si el vehículo
+    // (en edición) ya tiene alguno de esos datos cargados.
+    var datosVersionCard = el('div', { class: 'card' }, [
+      el('h3', { text: 'Datos de versión' }),
+      el('div', { class: 'grid-2' }, [
+        ui.field('Marca *', fMarca), ui.field('Modelo *', fModelo),
+        ui.field('Año', fAnio), ui.field('Versión', fVersion)
       ])
+    ]);
+    var hayVersionExtra = !!(v.patente || v.km != null || v.combustible || v.caja
+      || (v.estado && v.estado !== 'stock') || (v.documentacion && v.documentacion !== 'pendiente'));
+    var versionMasDatosBox = el('div', { class: 'card', hidden: !hayVersionExtra }, [
+      el('div', { class: 'grid-2' }, [
+        ui.field('Patente', fPatente), ui.field('Kilometraje', fKm),
+        ui.field('Combustible', fComb), ui.field('Tipo de caja', fCaja),
+        ui.field('Estado', fEstado), ui.field('Documentación', fDoc)
+      ])
+    ]);
+    var versionMasDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: versionMasDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      versionMasDatosBox.hidden = !versionMasDatosBox.hidden;
+      versionMasDatosToggle.textContent = versionMasDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+    var hayInfoExtra = !!(v.precioPretendido || v.observaciones);
+    var masDatosBox = el('div', { class: 'card', hidden: !hayInfoExtra }, [
+      el('h3', { text: 'Información adicional' }),
+      ui.field('Precio pretendido (opcional)', pretendido.wrap, 'Se usa para estimar el valor del stock'),
+      ui.field('Observaciones', fObs)
     ]);
     var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
       masDatosBox.hidden = !masDatosBox.hidden;
@@ -331,13 +349,8 @@
       el('a', { class: 'back-link', href: isEdit ? '#/vehiculo/' + v.id : '#/', html: '‹ Volver' }),
       el('h1', { text: isEdit ? 'Editar vehículo' : 'Registrar vehículo' }),
 
-      el('div', { class: 'card' }, [
-        el('h3', { text: 'Datos del vehículo' }),
-        el('div', { class: 'grid-2' }, [
-          ui.field('Marca *', fMarca), ui.field('Modelo *', fModelo),
-          ui.field('Año', fAnio)
-        ])
-      ]),
+      datosVersionCard,
+      versionMasDatosToggle, versionMasDatosBox,
 
       origenCard,
       editOrigenCard,
@@ -559,9 +572,60 @@
     var tiKm = ui.input({ value: ti.km || '', inputmode: 'numeric', placeholder: 'Kilometraje' });
     var tiValor = ui.money2('tiValor', ti.valor || '', ti.moneda || 'ARS');
     var tiObs = ui.textarea({ value: ti.observaciones || '', rows: 2, placeholder: 'Observaciones del vehículo recibido' });
-    var difMonto = ui.money2('dif', s.diferencia ? s.diferencia.monto : '', s.diferencia ? s.diferencia.moneda : 'ARS');
     var tiLinkNote = el('p', { class: 'form-help' });
     if (ti.vehicleId) tiLinkNote.textContent = 'Este vehículo ya fue incorporado al stock. Editá sus datos desde su propia ficha.';
+
+    // La diferencia (precio de venta − valor asignado al vehículo recibido)
+    // ya no se pide a mano: se calcula sola y se muestra solo como
+    // información, igual que "Ganancia estimada" en el preview de arriba.
+    // No afecta la ganancia (finance.js la calcula a partir de v.sale.precio
+    // solamente) — diferenciaARS es puramente informativo/de Excel.
+    var tiDifStrong = el('strong', {});
+    var tiDiferenciaRow = el('div', { class: 'sale-preview-row' }, [el('span', { text: 'Diferencia a cobrar (calculada)' }), tiDifStrong]);
+    function tiDiferenciaARS() {
+      var sRate = store.num(fCotiz.value) || App.finance.currentRate();
+      var ventaARS = App.finance.toARS(store.num(precio.monto.value), precio.moneda.value, sRate);
+      var tiARS = App.finance.toARS(store.num(tiValor.monto.value), tiValor.moneda.value, sRate);
+      return ventaARS - tiARS;
+    }
+
+    // Cómo se cobró esa diferencia (efectivo / transferencia / combinación):
+    // mismos inputs y misma validación de "no coincide" que ya usa el precio
+    // de venta cuando la forma de cobro es "mixto" — nada nuevo, reutilizado.
+    // Solo aparece si hay una diferencia real a cobrar (tiEnabled + dif > 0).
+    var difIni = s.diferencia || {};
+    var tiDifEfec = ui.moneyInput({ value: difIni.montoEfectivo || '', placeholder: '0' });
+    var tiDifTransf = ui.moneyInput({ value: difIni.montoTransferencia || '', placeholder: '0' });
+    var tiDifError = el('p', { class: 'auth-err', hidden: true });
+    var tiDifFormaBox = el('div', { hidden: true }, [
+      el('div', { class: 'form-section-title', text: 'Forma de pago de la diferencia' }),
+      el('div', { class: 'grid-2' }, [ui.field('Efectivo', tiDifEfec), ui.field('Transferencia', tiDifTransf)]),
+      tiDifError
+    ]);
+    function checkTiDif() {
+      var dif = tiDiferenciaARS();
+      if (!tiEnabled.checked || dif <= 0.01) { tiDifError.hidden = true; return true; }
+      var sum = store.num(tiDifEfec.value) + store.num(tiDifTransf.value);
+      var falta = dif - sum;
+      if (Math.abs(falta) <= 0.01) { tiDifError.hidden = true; return true; }
+      tiDifError.hidden = false;
+      tiDifError.textContent = falta > 0
+        ? 'Todavía faltan ' + App.fmt.money(falta) + ' para completar la diferencia.'
+        : 'Ingresaste ' + App.fmt.money(-falta) + ' de más.';
+      return false;
+    }
+    [tiDifEfec, tiDifTransf].forEach(function (i) { i.addEventListener('input', checkTiDif); });
+
+    function updateTiDiferencia() {
+      var dif = tiDiferenciaARS();
+      tiDifStrong.textContent = App.fmt.money(dif);
+      tiDifStrong.className = dif >= 0 ? 'pos' : 'neg';
+      tiDifFormaBox.hidden = !(tiEnabled.checked && dif > 0.01);
+      checkTiDif();
+    }
+    [precio.monto, precio.moneda, fCotiz, tiValor.monto, tiValor.moneda].forEach(function (i) {
+      i.addEventListener('input', updateTiDiferencia); i.addEventListener('change', updateTiDiferencia);
+    });
 
     var tiBox = el('div', { class: 'trade-in-box' }, [
       el('div', { class: 'grid-2' }, [
@@ -570,8 +634,8 @@
         ui.field('Kilometraje', tiKm), ui.field('Valor asignado', tiValor.wrap)
       ]),
       ui.field('Observaciones', tiObs),
-      el('div', { class: 'form-section-title', text: 'Diferencia recibida' }),
-      ui.field('Monto de la diferencia', difMonto.wrap, 'La diferencia que efectivamente cobraste, además del vehículo'),
+      tiDiferenciaRow,
+      tiDifFormaBox,
       tiLinkNote
     ]);
 
@@ -587,6 +651,7 @@
       tiBox.hidden = !tiEnabled.checked;
       var inputs = tiBox.querySelectorAll('input,textarea,select,button');
       Array.prototype.forEach.call(inputs, function (i) { i.disabled = !!ti.vehicleId; });
+      updateTiDiferencia();
     }
     tiEnabled.addEventListener('change', syncTi);
     fForma.addEventListener('change', syncForma);
@@ -666,7 +731,7 @@
         el('button', { class: 'btn btn-primary', text: 'Guardar venta', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz(); updatePreview(); checkMixto();
+    syncForma(); syncCotiz(); updatePreview(); checkMixto(); updateTiDiferencia();
 
     var submitted = false;
     function submit() {
@@ -703,7 +768,9 @@
         tradeIn: tradeIn,
         financiacion: financiacion,
         comision: comision.get(),
-        diferencia: (tiEnabled.checked && store.num(difMonto.monto.value) > 0) ? { monto: difMonto.monto.value, moneda: difMonto.moneda.value } : null
+        diferencia: (tiEnabled.checked && tiDiferenciaARS() > 0.01)
+          ? { monto: tiDiferenciaARS(), moneda: 'ARS', montoEfectivo: tiDifEfec.value, montoTransferencia: tiDifTransf.value }
+          : null
       };
       store.setSale(v.id, data);
       ui.toast('Venta registrada', 'success');
