@@ -107,15 +107,18 @@
   }
 
   function save() {
-    // modo online (multi-usuario): guardar en la nube
-    if (App.data && App.data.onLocalChange) { App.data.onLocalChange(state); return; }
-    // modo local (archivo): localStorage
+    // modo local (archivo) y respaldo local del modo online: localStorage.
+    // En modo online esto es sólo una copia de resguardo por si el dispositivo
+    // se queda sin conexión antes de poder subir los cambios a la nube; nunca
+    // reemplaza la sincronización en sí.
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
       console.error('No se pudo guardar el estado:', err);
       App.ui && App.ui.toast('Error al guardar. ¿Almacenamiento lleno?', 'error');
     }
+    // modo online (multi-usuario): además, guardar en la nube
+    if (App.data && App.data.onLocalChange) App.data.onLocalChange(state);
   }
 
   // reemplaza el estado completo (usado por la sincronización con la nube). No guarda.
