@@ -4962,21 +4962,18 @@ details.card[open] > summary { margin-bottom: 10px; }
   }
 
   /* ==================== FORM GASTO DEL NEGOCIO (fijo) ================= */
-  var GASTO_CATS = [
-    ['alquiler', 'Alquiler del local'],
-    ['sueldos', 'Sueldos'],
-    ['seguros', 'Seguros / flota'],
-    ['patentes', 'Patentes e impuestos'],
-    ['servicios', 'Servicios (luz, internet…)'],
-    ['publicidad', 'Publicidad'],
-    ['otro', 'Otro']
-  ];
+  // Simplificado a propósito: concepto, monto, frecuencia y fecha son los
+  // únicos datos que hacen falta para cargar un gasto rápido desde el
+  // celular. "Categoría" se sacó del formulario (no se usa en ningún
+  // cálculo, solo era una etiqueta); los gastos nuevos quedan con
+  // categoría 'otro' — normalizeFixedExpense ya la completaba así por
+  // defecto, así que Excel/historial siguen funcionando igual. Cotización,
+  // "Hasta" y Notas son secundarios: quedan detrás de "+ Más datos".
   function fixedExpenseForm(fixed) {
     var f = fixed || {};
     var isEdit = !!fixed;
 
     var fConcepto = ui.input({ value: f.concepto || '', required: true, placeholder: 'Ej: Alquiler del local' });
-    var fCat = ui.select(GASTO_CATS.map(function (c) { return opt(c[0], c[1]); }), f.categoria || 'otro');
     var monto = ui.money2('fijo', f.monto || '', f.moneda || 'ARS');
     var fCotiz = ui.moneyInput({ value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz);
@@ -4996,13 +4993,18 @@ details.card[open] > summary { margin-bottom: 10px; }
     fFrec.addEventListener('change', sync);
     monto.moneda.addEventListener('change', sync);
 
+    var hayMasDatos = !!(f.notas || f.hasta || f.cotizacionUSD);
+    var masDatosBox = el('div', { hidden: !hayMasDatos }, [cotizField, hastaField, ui.field('Notas', fNotas)]);
+    var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      masDatosBox.hidden = !masDatosBox.hidden;
+      masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       ui.field('Concepto *', fConcepto),
-      el('div', { class: 'grid-2' }, [ui.field('Categoría', fCat), ui.field('Monto', monto.wrap)]),
-      cotizField,
+      ui.field('Monto', monto.wrap),
       el('div', { class: 'grid-2' }, [ui.field('¿Cada cuánto?', fFrec), fechaField]),
-      hastaField,
-      ui.field('Notas', fNotas)
+      masDatosToggle, masDatosBox
     ]);
 
     var footer = [
@@ -5024,7 +5026,7 @@ details.card[open] > summary { margin-bottom: 10px; }
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto', 'error'); return; }
       submitted = true;
       var data = {
-        concepto: fConcepto.value, categoria: fCat.value, monto: monto.monto.value, moneda: monto.moneda.value,
+        concepto: fConcepto.value, categoria: f.categoria || 'otro', monto: monto.monto.value, moneda: monto.moneda.value,
         cotizacionUSD: fCotiz.value, frecuencia: fFrec.value, fecha: fFecha.value, hasta: fHasta.value, notas: fNotas.value
       };
       if (isEdit) { store.updateFixedExpense(f.id, data); ui.toast('Gasto actualizado', 'success'); }
@@ -5117,7 +5119,7 @@ details.card[open] > summary { margin-bottom: 10px; }
     vehicleFormView: vehicleFormView, purchaseForm: purchaseForm, saleForm: saleForm, expenseForm: expenseForm,
     reservationForm: reservationForm, fixedExpenseForm: fixedExpenseForm,
     reminderForm: reminderForm, CHECKLIST_ITEMS: CHECKLIST_ITEMS,
-    REM_TIPOS: REM_TIPOS, REM_REPEAT: REM_REPEAT, GASTO_CATS: GASTO_CATS
+    REM_TIPOS: REM_TIPOS, REM_REPEAT: REM_REPEAT
   };
 })();
 </script>
@@ -6447,15 +6449,6 @@ details.card[open] > summary { margin-bottom: 10px; }
       content.appendChild(el('h3', { text: 'Resumen del negocio', style: 'margin-top:6px' }));
       content.appendChild(navCard('📊', 'Ver estadísticas del negocio', 'Ver rendimiento, ventas, tiempos, resultados y otros indicadores del negocio.', 'negocio'));
       content.appendChild(navCard('🚗', 'Ver estadísticas por vehículo', 'Ver el detalle y rendimiento de cada vehículo.', 'vehiculos'));
-
-      var evts = store.getHistory().slice(0, 6);
-      if (evts.length) {
-        content.appendChild(el('div', { class: 'card-actions-head', style: 'margin-top:6px' }, [
-          el('h3', { text: 'Actividad reciente' }),
-          el('a', { class: 'mini-tag', href: '#/historial', text: 'Ver todo →' })
-        ]));
-        content.appendChild(el('div', { class: 'card' }, App.views.timeline(evts)));
-      }
     }
 
     function vehiculosStatsCard() {
@@ -6951,11 +6944,14 @@ details.card[open] > summary { margin-bottom: 10px; }
         el('h3', { text: 'Estadísticas' }),
         el('p', { class: 'page-sub', text: 'Indicadores clave del negocio' })
       ]),
-      el('div', { class: 'stat-grid stat-grid-4' }, [
+      // "Ganancia total" se sacó de acá: es el mismo número que ya se ve
+      // como "Ganancia obtenida" en Situación económica (fin.globalMetrics()
+      // en ambos casos) — no tiene sentido mostrarlo dos veces con nombres
+      // distintos.
+      el('div', { class: 'grid-3' }, [
         miniStat('Autos vendidos', fmt.num(g.autosVendidos)),
         miniStat('Autos en stock', fmt.num(g.autosEnStock)),
-        miniStat('Ganancia promedio', fmt.money(g.gananciaPromedio)),
-        miniStat('Ganancia total', fmt.money(g.gananciaTotal), g.gananciaTotal >= 0 ? 'pos' : 'neg')
+        miniStat('Ganancia promedio', fmt.money(g.gananciaPromedio))
       ]),
       el('div', { class: 'grid-2 highlight-grid' }, [
         highlight('Auto más rentable', g.masRentable, function (x) { return fmt.pct(x.m.rentabilidad); }),

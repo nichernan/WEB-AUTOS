@@ -535,15 +535,6 @@
       content.appendChild(el('h3', { text: 'Resumen del negocio', style: 'margin-top:6px' }));
       content.appendChild(navCard('📊', 'Ver estadísticas del negocio', 'Ver rendimiento, ventas, tiempos, resultados y otros indicadores del negocio.', 'negocio'));
       content.appendChild(navCard('🚗', 'Ver estadísticas por vehículo', 'Ver el detalle y rendimiento de cada vehículo.', 'vehiculos'));
-
-      var evts = store.getHistory().slice(0, 6);
-      if (evts.length) {
-        content.appendChild(el('div', { class: 'card-actions-head', style: 'margin-top:6px' }, [
-          el('h3', { text: 'Actividad reciente' }),
-          el('a', { class: 'mini-tag', href: '#/historial', text: 'Ver todo →' })
-        ]));
-        content.appendChild(el('div', { class: 'card' }, App.views.timeline(evts)));
-      }
     }
 
     function vehiculosStatsCard() {
@@ -1039,11 +1030,14 @@
         el('h3', { text: 'Estadísticas' }),
         el('p', { class: 'page-sub', text: 'Indicadores clave del negocio' })
       ]),
-      el('div', { class: 'stat-grid stat-grid-4' }, [
+      // "Ganancia total" se sacó de acá: es el mismo número que ya se ve
+      // como "Ganancia obtenida" en Situación económica (fin.globalMetrics()
+      // en ambos casos) — no tiene sentido mostrarlo dos veces con nombres
+      // distintos.
+      el('div', { class: 'grid-3' }, [
         miniStat('Autos vendidos', fmt.num(g.autosVendidos)),
         miniStat('Autos en stock', fmt.num(g.autosEnStock)),
-        miniStat('Ganancia promedio', fmt.money(g.gananciaPromedio)),
-        miniStat('Ganancia total', fmt.money(g.gananciaTotal), g.gananciaTotal >= 0 ? 'pos' : 'neg')
+        miniStat('Ganancia promedio', fmt.money(g.gananciaPromedio))
       ]),
       el('div', { class: 'grid-2 highlight-grid' }, [
         highlight('Auto más rentable', g.masRentable, function (x) { return fmt.pct(x.m.rentabilidad); }),

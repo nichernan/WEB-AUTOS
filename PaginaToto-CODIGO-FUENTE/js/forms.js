@@ -806,21 +806,18 @@
   }
 
   /* ==================== FORM GASTO DEL NEGOCIO (fijo) ================= */
-  var GASTO_CATS = [
-    ['alquiler', 'Alquiler del local'],
-    ['sueldos', 'Sueldos'],
-    ['seguros', 'Seguros / flota'],
-    ['patentes', 'Patentes e impuestos'],
-    ['servicios', 'Servicios (luz, internet…)'],
-    ['publicidad', 'Publicidad'],
-    ['otro', 'Otro']
-  ];
+  // Simplificado a propósito: concepto, monto, frecuencia y fecha son los
+  // únicos datos que hacen falta para cargar un gasto rápido desde el
+  // celular. "Categoría" se sacó del formulario (no se usa en ningún
+  // cálculo, solo era una etiqueta); los gastos nuevos quedan con
+  // categoría 'otro' — normalizeFixedExpense ya la completaba así por
+  // defecto, así que Excel/historial siguen funcionando igual. Cotización,
+  // "Hasta" y Notas son secundarios: quedan detrás de "+ Más datos".
   function fixedExpenseForm(fixed) {
     var f = fixed || {};
     var isEdit = !!fixed;
 
     var fConcepto = ui.input({ value: f.concepto || '', required: true, placeholder: 'Ej: Alquiler del local' });
-    var fCat = ui.select(GASTO_CATS.map(function (c) { return opt(c[0], c[1]); }), f.categoria || 'otro');
     var monto = ui.money2('fijo', f.monto || '', f.moneda || 'ARS');
     var fCotiz = ui.moneyInput({ value: f.cotizacionUSD || '', placeholder: 'Cotización (si es en USD)' });
     var cotizField = ui.field('Cotización del dólar (opcional)', fCotiz);
@@ -840,13 +837,18 @@
     fFrec.addEventListener('change', sync);
     monto.moneda.addEventListener('change', sync);
 
+    var hayMasDatos = !!(f.notas || f.hasta || f.cotizacionUSD);
+    var masDatosBox = el('div', { hidden: !hayMasDatos }, [cotizField, hastaField, ui.field('Notas', fNotas)]);
+    var masDatosToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos', onclick: function () {
+      masDatosBox.hidden = !masDatosBox.hidden;
+      masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
+    } });
+
     var body = el('div', { class: 'form-grid' }, [
       ui.field('Concepto *', fConcepto),
-      el('div', { class: 'grid-2' }, [ui.field('Categoría', fCat), ui.field('Monto', monto.wrap)]),
-      cotizField,
+      ui.field('Monto', monto.wrap),
       el('div', { class: 'grid-2' }, [ui.field('¿Cada cuánto?', fFrec), fechaField]),
-      hastaField,
-      ui.field('Notas', fNotas)
+      masDatosToggle, masDatosBox
     ]);
 
     var footer = [
@@ -868,7 +870,7 @@
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto', 'error'); return; }
       submitted = true;
       var data = {
-        concepto: fConcepto.value, categoria: fCat.value, monto: monto.monto.value, moneda: monto.moneda.value,
+        concepto: fConcepto.value, categoria: f.categoria || 'otro', monto: monto.monto.value, moneda: monto.moneda.value,
         cotizacionUSD: fCotiz.value, frecuencia: fFrec.value, fecha: fFecha.value, hasta: fHasta.value, notas: fNotas.value
       };
       if (isEdit) { store.updateFixedExpense(f.id, data); ui.toast('Gasto actualizado', 'success'); }
@@ -961,6 +963,6 @@
     vehicleFormView: vehicleFormView, purchaseForm: purchaseForm, saleForm: saleForm, expenseForm: expenseForm,
     reservationForm: reservationForm, fixedExpenseForm: fixedExpenseForm,
     reminderForm: reminderForm, CHECKLIST_ITEMS: CHECKLIST_ITEMS,
-    REM_TIPOS: REM_TIPOS, REM_REPEAT: REM_REPEAT, GASTO_CATS: GASTO_CATS
+    REM_TIPOS: REM_TIPOS, REM_REPEAT: REM_REPEAT
   };
 })();
