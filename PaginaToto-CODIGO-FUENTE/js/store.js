@@ -51,8 +51,8 @@
   // convierte a entero o null (nunca deja NaN guardado, p.ej. si alguien escribe letras en
   // Año/Km; tampoco un negativo, que no tiene sentido para ninguno de los dos campos)
   function toIntOrNull(x) {
-    if (x === '' || x == null) return null;
-    var n = parseInt(x, 10);
+    if (x === '' || x == null || !/[0-9]/.test(String(x))) return null;
+    var n = Math.round(num(x));
     if (isNaN(n) || n < 0) return null;
     return n;
   }

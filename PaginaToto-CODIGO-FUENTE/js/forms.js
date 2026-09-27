@@ -124,6 +124,11 @@
     p = p || {};
     var fFecha = ui.input({ type: 'date', value: p.fecha || store.todayISO() });
     var precio = ui.money2('vfCompra', p.precio || '', p.moneda || 'ARS');
+    var fCotiz = ui.moneyInput({ value: p.cotizacionUSD || '', placeholder: '1500' });
+    var cotizField = ui.field('Cotización del dólar al momento de la compra', fCotiz, 'Se guarda como valor histórico y no cambia luego');
+    function syncCotiz() { cotizField.hidden = precio.moneda.value !== 'ARS'; }
+    precio.moneda.addEventListener('change', syncCotiz);
+    syncCotiz();
     var fForma = ui.select([opt('transferencia', 'Transferencia'), opt('efectivo', 'Efectivo'), opt('mixto', 'Mitad transferencia / mitad efectivo'), opt('cuotas', 'En cuotas')], p.formaPago || 'transferencia');
     var fTransf = ui.moneyInput({ value: p.montoTransferencia || '', placeholder: 'Monto transferencia' });
     var fEfec = ui.moneyInput({ value: p.montoEfectivo || '', placeholder: 'Monto efectivo' });
@@ -148,15 +153,21 @@
     function sync() { mixtoBox.hidden = fForma.value !== 'mixto'; cuotas.section.hidden = fForma.value !== 'cuotas'; }
     fForma.addEventListener('change', sync);
     sync(); checkMixto();
-    // Proveedor/vendedor es un dato secundario: no hace falta para registrar
-    // la compra, así que queda detrás de "+ Más datos" (mismo patrón que Alertas).
-    var provBox = el('div', { class: 'grid-2', hidden: !(pr.nombre || pr.telefono) }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)]);
+    // Fecha de compra, cotización del dólar y proveedor/vendedor son datos
+    // secundarios: no hace falta tocarlos para registrar rápido un vehículo
+    // (la fecha ya queda en el día de hoy y se guarda igual aunque este
+    // bloque esté cerrado), así que quedan detrás de "+ Más datos" (mismo
+    // patrón que Alertas).
+    var provBox = el('div', { hidden: !(pr.nombre || pr.telefono || p.cotizacionUSD) }, [
+      el('div', { class: 'grid-2' }, [ui.field('Fecha de compra', fFecha), cotizField]),
+      el('div', { class: 'grid-2' }, [ui.field('Proveedor / vendedor', fProvNom), ui.field('Teléfono', fProvTel)])
+    ]);
     var provToggle = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', text: provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos', onclick: function () {
       provBox.hidden = !provBox.hidden;
       provToggle.textContent = provBox.hidden ? '＋ Más datos de la compra' : '－ Menos datos';
     } });
     var node = el('div', { class: 'form-grid' }, [
-      el('div', { class: 'grid-2' }, [ui.field('Precio de compra', precio.wrap), ui.field('Fecha de compra', fFecha)]),
+      ui.field('Precio de compra', precio.wrap),
       ui.field('Forma de pago', fForma),
       mixtoBox,
       cuotas.section,
@@ -169,6 +180,7 @@
       getData: function () {
         return {
           fecha: fFecha.value, precio: precio.monto.value, moneda: precio.moneda.value,
+          cotizacionUSD: fCotiz.value,
           formaPago: fForma.value, montoTransferencia: fTransf.value, montoEfectivo: fEfec.value,
           cuotas: fForma.value === 'cuotas' ? cuotas.getCuotas() : [],
           proveedor: { nombre: fProvNom.value, telefono: fProvTel.value, notas: pr.notas || '' }
@@ -235,7 +247,7 @@
     var fModelo = ui.input({ value: v.modelo || '', required: true, placeholder: 'Corolla' });
     var fAnio = ui.input({ value: v.anio || '', inputmode: 'numeric', placeholder: '2016' });
     var fPatente = ui.input({ value: v.patente || '', placeholder: 'AB123CD', style: 'text-transform:uppercase' });
-    var fKm = ui.input({ value: v.km != null ? v.km : '', inputmode: 'numeric', placeholder: '98000' });
+    var fKm = ui.moneyInput({ value: v.km != null ? v.km : '', placeholder: '98.000' });
     var fComb = ui.select([opt('', '—')].concat(COMBUSTIBLES.map(function (c) { return opt(c, c); })), v.combustible || '');
     var fCaja = ui.select([opt('', '—'), opt('manual', 'Manual'), opt('automatica', 'Automática')], v.caja || '');
     var fVersion = ui.input({ value: v.version || '', placeholder: 'XEI 1.8 CVT' });
