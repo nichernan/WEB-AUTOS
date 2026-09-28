@@ -94,9 +94,7 @@ img { max-width: 100%; display: block; }
   flex-direction: column;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 18px; }
-.brand-logo { font-size: 1.6rem; }
-.brand strong { display: block; font-size: 1.05rem; }
-.brand-sub { font-size: .72rem; color: var(--c-text-mute); }
+.brand-logo-img { display: block; width: 100%; max-width: 190px; height: auto; }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-divider { height: 1px; background: var(--c-border); margin: 8px 6px; }
@@ -127,7 +125,7 @@ img { max-width: 100%; display: block; }
   position: sticky; top: 0; z-index: 20;
 }
 .menu-toggle { display: none; }
-.topbar-brand { display: none; font-weight: 700; font-size: 1.05rem; }
+.topbar-brand { display: none; height: 30px; width: auto; }
 .topbar-search-wrap { flex: 1; max-width: 520px; }
 .topbar-search { width: 100%; }
 .btn-add-top span:first-child { font-size: 1.05rem; line-height: 1; }
@@ -987,8 +985,8 @@ details.card[open] > summary { margin-bottom: 10px; }
   border-radius: 16px; padding: 28px 24px;
   box-shadow: var(--shadow-md, 0 10px 40px rgba(0,0,0,.12));
 }
-.auth-brand { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; font-size: 1.1rem; }
-.auth-logo { font-size: 1.5rem; }
+.auth-brand { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.auth-logo-img { display: block; width: 100%; max-width: 220px; height: auto; }
 .auth-card h2 { margin: 0 0 16px; font-size: 1.15rem; }
 .auth-form { display: flex; flex-direction: column; gap: 14px; }
 .auth-form .input { font-size: 16px; }

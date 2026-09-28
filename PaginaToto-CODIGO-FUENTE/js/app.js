@@ -115,8 +115,7 @@
     var online = App.auth && App.auth.enabled;
     sidebarEl = el('aside', { class: 'sidebar' }, [
       el('div', { class: 'brand' }, [
-        el('div', { class: 'brand-logo', text: '🚘' }),
-        el('div', {}, [el('strong', { text: 'PaginaToto' }), el('span', { class: 'brand-sub', text: 'Gestión de compraventa' })])
+        el('img', { class: 'brand-logo-img', src: App.assets.logo, alt: 'Car Style Mercedes' })
       ]),
       el('nav', { class: 'nav' }, navItems()),
       online ? el('div', { class: 'sidebar-user' }, [
@@ -141,7 +140,7 @@
 
     var topbar = el('header', { class: 'topbar' }, [
       el('button', { class: 'icon-btn menu-toggle', html: '☰', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }),
-      el('div', { class: 'topbar-brand', text: 'PaginaToto' }),
+      el('img', { class: 'topbar-brand', src: App.assets.logo, alt: 'Car Style Mercedes' }),
       el('div', { class: 'topbar-search-wrap' }, searchEl),
       el('button', { class: 'btn btn-primary btn-add-top', html: '<span>＋</span><span class="hide-sm">Vehículo</span>', 'aria-label': 'Registrar vehículo', onclick: function () { App.router.go('vehiculo-nuevo'); } })
     ]);

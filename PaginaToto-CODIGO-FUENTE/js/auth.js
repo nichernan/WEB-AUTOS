@@ -23,8 +23,7 @@
   function card(children) {
     return el('div', { class: 'auth-card' }, [
       el('div', { class: 'auth-brand' }, [
-        el('span', { class: 'auth-logo', text: '🚘' }),
-        el('strong', { text: 'PaginaToto' })
+        el('img', { class: 'auth-logo-img', src: App.assets.logo, alt: 'Car Style Mercedes' })
       ])
     ].concat(children));
   }
