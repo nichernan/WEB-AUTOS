@@ -1142,7 +1142,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { state = seedIfEmpty(emptyState()); save(); takeSnapshot(); return; }
+      if (!raw) { state = emptyState(); save(); takeSnapshot(); return; }
       var parsed = JSON.parse(raw);
       state = migrate(parsed);
       takeSnapshot();   // copia de seguridad interna (1 por día, últimas 5)
@@ -1891,57 +1891,6 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
   function formaCobroLabel(f) {
     return ({ transferencia: 'Transferencia', efectivo: 'Efectivo', mixto: 'Mitad transferencia / mitad efectivo', vehiculo: 'Entrega de vehículo', financiado: 'Financiado / con prenda' })[f] || f;
-  }
-
-  /* ---------------------------- Datos de ejemplo ---------------------- */
-  function seedIfEmpty(st) {
-    // Se cargan pocos datos representativos para que la app no se vea vacía.
-    // El usuario puede borrarlos desde Ajustes → Reiniciar datos.
-    var prev = state; state = st;
-    try {
-      var v1 = createVehicle({ marca: 'Toyota', modelo: 'Corolla', anio: 2016, patente: 'AB123CD', km: 98000, combustible: 'Nafta', caja: 'automatica', version: 'XEI 1.8', documentacion: 'completa', observaciones: 'Único dueño, service oficial al día.' }, { silent: true });
-      setPurchase(v1.id, { fecha: '2026-07-10', precio: 15000000, moneda: 'ARS', cotizacionUSD: 1500, formaPago: 'transferencia', proveedor: { nombre: 'Juan Pérez', telefono: '11-5555-1234' } });
-      addExpense(v1.id, { monto: 200000, moneda: 'ARS', fecha: '2026-07-18', observacion: 'Cambio de vidrio delantero' });
-      addExpense(v1.id, { monto: 650000, moneda: 'ARS', fecha: '2026-07-22', observacion: 'Service completo, cubiertas y detailing interior' });
-      setSale(v1.id, { fecha: '2026-09-02', precio: 18500000, moneda: 'ARS', cotizacionUSD: 1600, formaCobro: 'transferencia', cliente: { nombre: 'Marcelo Gómez', telefono: '11-4444-9876' } });
-
-      var v2 = createVehicle({ marca: 'Volkswagen', modelo: 'Golf', anio: 2018, patente: 'AD456EF', km: 72000, combustible: 'Nafta', caja: 'automatica', version: 'Comfortline 1.4 TSI', documentacion: 'transferencia', observaciones: 'Detalle de pintura en puerta trasera derecha.' }, { silent: true });
-      setPurchase(v2.id, { fecha: '2026-08-05', precio: 12000, moneda: 'USD', cotizacionUSD: 1520, formaPago: 'cuotas', cuotas: [
-        { numero: 1, monto: 4000, vencimiento: '2026-08-05', pagada: true, fechaPago: '2026-08-05' },
-        { numero: 2, monto: 4000, vencimiento: '2026-09-05', pagada: true, fechaPago: '2026-09-04' },
-        { numero: 3, monto: 4000, vencimiento: '2026-10-05', pagada: false }
-      ], proveedor: { nombre: 'AutoHaus', telefono: '11-3333-2211' } });
-      addExpense(v2.id, { monto: 300000, moneda: 'ARS', fecha: '2026-08-12', observacion: 'Pulido y pintura puerta' });
-
-      var off = function (d) { var x = new Date(); x.setDate(x.getDate() + d); return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate()); };
-
-      var v3 = createVehicle({ marca: 'Ford', modelo: 'Focus', anio: 2015, patente: 'MJP902', km: 130000, combustible: 'Nafta', caja: 'manual', version: 'SE 2.0', documentacion: 'pendiente', observaciones: '' }, { silent: true });
-      setPurchase(v3.id, { fecha: '2026-06-01', precio: 9500000, moneda: 'ARS', cotizacionUSD: 1450, formaPago: 'mixto', montoTransferencia: 5000000, montoEfectivo: 4500000 });
-      addExpense(v3.id, { monto: 120000, moneda: 'ARS', fecha: '2026-06-15', observacion: 'Chapa y pintura paragolpes' });
-      setReservation(v3.id, { fecha: off(-2), monto: 1500000, moneda: 'ARS', vence: off(4), cliente: { nombre: 'Diego Fernández', telefono: '11-6666-3030' }, notas: 'Seña recibida en efectivo. Paga el resto cuando esté la transferencia.' });
-
-      var v4 = createVehicle({ marca: 'Chevrolet', modelo: 'Cruze', anio: 2019, patente: 'AC789GH', km: 65000, combustible: 'Nafta', caja: 'automatica', version: 'LT 1.4 Turbo', documentacion: 'completa', observaciones: '' }, { silent: true });
-      setPurchase(v4.id, { fecha: '2026-05-10', precio: 13500000, moneda: 'ARS', cotizacionUSD: 1480, formaPago: 'transferencia', proveedor: { nombre: 'Particular (Lucía R.)', telefono: '11-2020-4040' }, comision: { persona: 'Rubén (contacto)', monto: 200000, moneda: 'ARS', pagada: true } });
-      setSale(v4.id, { fecha: '2026-08-20', precio: 17000000, moneda: 'ARS', cotizacionUSD: 1550, formaCobro: 'financiado', cliente: { nombre: 'Sofía Ramírez', telefono: '11-7788-1122' },
-        financiacion: { enabled: true, entidad: 'Financiera del Sur', entrega: 7000000, moneda: 'ARS', notas: 'Prenda a 6 cuotas.', cuotas: [
-          { numero: 1, monto: 1750000, vencimiento: off(-20), cobrada: true, fechaCobro: off(-19) },
-          { numero: 2, monto: 1750000, vencimiento: off(10) },
-          { numero: 3, monto: 1750000, vencimiento: off(40) },
-          { numero: 4, monto: 1750000, vencimiento: off(70) },
-          { numero: 5, monto: 1750000, vencimiento: off(100) },
-          { numero: 6, monto: 1750000, vencimiento: off(130) }
-        ] } });
-
-      addFixedExpense({ concepto: 'Alquiler del local', categoria: 'alquiler', monto: 900000, moneda: 'ARS', frecuencia: 'mensual', fecha: '2026-03-01' });
-      addFixedExpense({ concepto: 'Seguro de la flota', categoria: 'seguros', monto: 350000, moneda: 'ARS', frecuencia: 'mensual', fecha: '2026-03-01' });
-      addFixedExpense({ concepto: 'Cartel nuevo del frente', categoria: 'publicidad', monto: 480000, moneda: 'ARS', frecuencia: 'unica', fecha: '2026-07-05' });
-
-      addReminder({ titulo: 'Turno de transferencia con Marcelo Gómez', fecha: off(0), hora: '10:30', tipo: 'gestoria', nota: 'Llevar título y cédula del Corolla.' });
-      addReminder({ titulo: 'Service completo Volkswagen Golf', fecha: off(2), hora: '09:00', tipo: 'mantenimiento' });
-      addReminder({ titulo: 'Renovar VTV Ford Focus', fecha: off(-3), tipo: 'tramite', nota: 'Está vencida, sacar turno.' });
-      addReminder({ titulo: 'Limpiar y ordenar el playón', fecha: off(0), tipo: 'tarea', repeat: 'weekly' });
-    } catch (e) { console.error('seed', e); }
-    var result = state; state = prev; return result;
   }
 
   /* ------------------------------- Export API -------------------------- */
