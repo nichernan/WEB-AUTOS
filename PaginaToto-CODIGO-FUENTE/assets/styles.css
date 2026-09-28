@@ -864,7 +864,7 @@ details.card[open] > summary { margin-bottom: 10px; }
 .rem-item.is-done { opacity: .6; }
 .rem-item-body { flex: 1; min-width: 0; cursor: pointer; }
 .rem-item-title { display: flex; align-items: center; gap: 8px; font-weight: 620; font-size: .92rem; }
-.rem-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rem-item-name { overflow-wrap: anywhere; }
 .rem-item.is-done .rem-item-name { text-decoration: line-through; }
 .rem-ico { font-size: 1rem; flex-shrink: 0; }
 .rem-item-meta { font-size: .77rem; color: var(--c-text-mute); margin-top: 3px; }

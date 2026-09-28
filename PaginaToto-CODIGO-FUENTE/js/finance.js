@@ -347,7 +347,18 @@
 
   /* ------------------- Gastos fijos del negocio ---------------------- */
   function fxRate(f) { return f.cotizacionUSD || currentRate(); }
+  // Un gasto fijo (alquiler, sueldos, etc.) nunca puede contarse como "ya
+  // gastado" más allá de hoy: si el rango pedido (p.ej. "Este año") llega
+  // hasta una fecha futura, se recorta a hoy para no sumar meses que todavía
+  // no pasaron (antes, "Este año" contaba el año calendario completo de una,
+  // incluyendo meses futuros, e inflaba el gasto fijo respecto al resto de
+  // la economía — que sí capa todo a hoy).
+  function capToToday(iso) {
+    var todayCap = App.store.todayISO();
+    return (iso && iso > todayCap) ? todayCap : iso;
+  }
   function fixedExpenseMonths(f, from, to) {
+    to = capToToday(to);
     if (f.frecuencia !== 'mensual') {
       return (f.fecha && (!from || f.fecha >= from) && (!to || f.fecha <= to)) ? 1 : 0;
     }
