@@ -282,12 +282,36 @@
     if (App.auth && App.auth.enabled) {
       // Modo online: login -> cargar datos de la nube -> app
       App.auth.boot(function () {
+        if (App.auth.offline) {
+          App.data.loadLocal().then(function () {
+            startShell();
+            afterBoot();
+          });
+          return;
+        }
         App.data.loadAll().then(function () {
           startShell();
           afterBoot();
           askMigration();
         }).catch(function (err) {
           console.error('No se pudieron cargar los datos:', err);
+          // La sesión ya se validó recién (no es el caso de "nunca inició
+          // sesión"): si esto fue un corte de red justo después del login y
+          // hay datos locales de una sincronización anterior, se sigue
+          // trabajando con esos datos en vez de dejar la app bloqueada.
+          var hayDatosLocales = false;
+          try {
+            var raw = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null');
+            hayDatosLocales = !!raw && ['vehicles', 'history', 'reminders', 'fixedExpenses'].some(function (k) { return Array.isArray(raw[k]) && raw[k].length; });
+          } catch (e) {}
+          if (App.auth.isNetworkError && App.auth.isNetworkError(err) && hayDatosLocales) {
+            App.data.loadLocal().then(function () {
+              startShell();
+              afterBoot();
+              App.ui.toast('No se pudo conectar con la nube. Mostrando la última información guardada.', 'error');
+            });
+            return;
+          }
           document.body.innerHTML = '';
           var box = el('div', { class: 'auth-screen' }, [
             el('div', { class: 'auth-card' }, [

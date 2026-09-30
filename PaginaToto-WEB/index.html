@@ -1196,7 +1196,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
       console.error('No se pudo guardar el estado:', err);
-      App.ui && App.ui.toast('Error al guardar. ¿Almacenamiento lleno?', 'error');
+      App.ui && App.ui.toast('No se guardaron los cambios en este dispositivo. Exportá una copia y liberá espacio.', 'error');
     }
     // modo online (multi-usuario): además, guardar en la nube
     if (App.data && App.data.onLocalChange) App.data.onLocalChange(state);
@@ -3843,6 +3843,51 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var sb = App.sb;
   var readyCb = null;
   var recovering = false; // true mientras se está por el link de "olvidé mi contraseña"
+  var PROFILE_KEY = 'paginaToto:verifiedProfile';
+  var offlineProfile = false;
+
+  function cachedProfile(session) {
+    try {
+      var p = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
+      if (!p || !session || !session.user || p.id !== session.user.id || !p.activo) return null;
+      var saved = JSON.parse(localStorage.getItem('paginaToto:v1') || 'null');
+      if (!saved || !['vehicles', 'history', 'reminders', 'fixedExpenses'].some(function (k) { return Array.isArray(saved[k]) && saved[k].length; })) return null;
+      // No conceder acceso después de la expiración del token que Supabase guardó.
+      if (!session.expires_at || session.expires_at * 1000 <= Date.now()) return null;
+      return p;
+    } catch (e) { return null; }
+  }
+
+  function isNetworkError(err) {
+    if (!err) return false;
+    var status = err.status || err.statusCode;
+    // Una respuesta HTTP/Auth explícita prevalece sobre navigator.onLine:
+    // incluso con la interfaz de red desconectada, un 401 no es un fallo de red.
+    if (status >= 400 && status < 500) return false;
+    if (status === 0 || status >= 500) return true;
+    if (err.name === 'TypeError' || err.name === 'NetworkError' || err.name === 'AbortError') return true;
+    if (/network|fetch|failed to fetch|load failed|timeout|timed out|offline/i.test(String(err.message || ''))) return true;
+    return !navigator.onLine && !err.code;
+  }
+
+  function networkFallback(err) {
+    if (!isNetworkError(err)) return Promise.reject(err);
+    return sb.auth.getSession().then(function (res) {
+      var session = res.data && res.data.session;
+      var p = cachedProfile(session);
+      if (!p) {
+        if (session && session.expires_at && session.expires_at * 1000 <= Date.now()) {
+          localStorage.removeItem(PROFILE_KEY);
+          return sb.auth.signOut().then(function () { return null; });
+        }
+        // Sin credencial local/perfil verificado se vuelve al login. Un fallo
+        // de red nunca crea una identidad offline.
+        return null;
+      }
+      offlineProfile = true;
+      return p;
+    });
+  }
 
   function fullScreen(node) {
     document.body.innerHTML = '';
@@ -3888,6 +3933,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
           return;
         }
         start();
+      }).catch(function (e) {
+        err.textContent = isNetworkError(e) ? 'No hay conexión a internet. Revisá tu conexión y volvé a intentar.' : 'No se pudo iniciar sesión. Volvé a intentar.';
+        btn.disabled = false; btn.textContent = 'Entrar';
       });
     }
   }
@@ -3945,12 +3993,33 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   function loadProfile() {
     return sb.auth.getUser().then(function (res) {
+      if (res.error) {
+        if (res.error.name === 'AuthSessionMissingError' || /session missing/i.test(String(res.error.message || ''))) {
+          localStorage.removeItem(PROFILE_KEY);
+          return null;
+        }
+        if (isNetworkError(res.error)) return networkFallback(res.error);
+        // Una respuesta real de Auth (401, token inválido/revocado) invalida
+        // la sesión almacenada y jamás habilita el fallback offline.
+        localStorage.removeItem(PROFILE_KEY);
+        if (res.error.status === 401 || res.error.status === 403 || res.error.code) {
+          return sb.auth.signOut().then(function () { return null; });
+        }
+        throw res.error;
+      }
       var user = res.data && res.data.user;
-      if (!user) return null;
+      if (!user) { localStorage.removeItem(PROFILE_KEY); return null; }
       return sb.from('profiles').select('*').eq('id', user.id).single().then(function (p) {
+        if (p.error) {
+          if (isNetworkError(p.error)) return networkFallback(p.error);
+          throw p.error;
+        }
         var base = { id: user.id, email: user.email, nombre: '', role: 'usuario', activo: false };
         return Object.assign(base, p.data || {}, { authEmail: user.email });
       });
+    }).catch(function (err) {
+      if (offlineProfile) throw err;
+      return networkFallback(err);
     });
   }
 
@@ -3960,8 +4029,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     loadProfile().then(function (p) {
       if (recovering) { recoveryScreen(); return; }
       if (!p) { loginScreen(); return; }
-      if (!p.activo) { fullScreen(blockedScreen(p)); return; }
+      if (!p.activo) { localStorage.removeItem(PROFILE_KEY); fullScreen(blockedScreen(p)); return; }
       App.auth.profile = p;
+      if (!offlineProfile) {
+        try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch (e) {}
+      }
+      App.auth.offline = offlineProfile;
       document.body.innerHTML = '';
       if (readyCb) readyCb(p);
     }).catch(function (e) {
@@ -3974,10 +4047,28 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   App.auth = {
     enabled: true,
     profile: null,
+    offline: false,
     isAdmin: function () { return !!(App.auth.profile && App.auth.profile.role === 'admin'); },
-    logout: function () { sb.auth.signOut().then(function () { location.reload(); }); },
+    // se usa en app.js para distinguir, después de un login ya validado, si
+    // la carga de datos que sigue falló por falta de red (recuperable con
+    // los datos locales) o por un error real (no ocultarlo con un fallback).
+    isNetworkError: isNetworkError,
+    logout: function () {
+      localStorage.removeItem(PROFILE_KEY);
+      sb.auth.signOut().then(function () { location.reload(); });
+    },
     boot: function (cb) { readyCb = cb; start(); },
-    reloadProfile: function () { return loadProfile().then(function (p) { if (p) App.auth.profile = p; return p; }); },
+    reloadProfile: function () {
+      offlineProfile = false;
+      return loadProfile().then(function (p) {
+        if (p) App.auth.profile = p;
+        App.auth.offline = offlineProfile;
+        if (p && p.activo && !offlineProfile) {
+          try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch (e) {}
+        }
+        return p;
+      });
+    },
     // llama a la Edge Function que administra usuarios (solo admin)
     adminApi: function (action, payload) {
       return sb.functions.invoke('admin-users', { body: Object.assign({ action: action }, payload || {}) })
@@ -3995,7 +4086,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   sb.auth.onAuthStateChange(function (evt) {
     if (evt === 'PASSWORD_RECOVERY') { recovering = true; recoveryScreen(); return; }
-    if (evt === 'SIGNED_OUT') location.reload();
+    if (evt === 'SIGNED_OUT') { localStorage.removeItem(PROFILE_KEY); location.reload(); }
   });
 })();
 </script>
@@ -4020,6 +4111,10 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var TABLES = ['vehicles', 'history', 'reminders', 'fixed_expenses'];
   var ARR = { vehicles: 'vehicles', history: 'history', reminders: 'reminders', fixed_expenses: 'fixedExpenses' };
   var pendingMigration = null;
+  var BASE_KEY = 'paginaToto:syncBase';
+  var offlineMode = false;
+  var reconnecting = false;
+  var channel = null;
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function j(o) { return JSON.stringify(o); }
@@ -4044,21 +4139,32 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
         if (r.k === 'meta') st.meta = Object.assign(st.meta, r.data || {});
       });
 
-      var vacio = !st.vehicles.length && !st.history.length && !st.reminders.length && !st.fixedExpenses.length;
+      var remote = clone(st);
+      var cloudState = clone(st);
       var local = null;
-      try { local = JSON.parse(localStorage.getItem('paginaToto:v1') || 'null'); } catch (e) {}
+      try { local = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null'); } catch (e) {}
+      if (offlineMode && local) st = mergeOfflineChanges(remote, local);
+
+      var vacio = !remote.vehicles.length && !remote.history.length && !remote.reminders.length && !remote.fixedExpenses.length;
       if (vacio && local && (local.vehicles || []).length) pendingMigration = local;
 
       applyingRemote = true;
       try { store.hydrate(st); } finally { applyingRemote = false; }
-      shadow = clone(store.getState());
+      shadow = clone(cloudState);
+      if (!offlineMode || !local) saveBase(cloudState);
+      if (offlineMode && local) {
+        offlineMode = false;
+        flush(store.getState());
+      }
       subscribe();
     });
   }
 
   /* ----------------------------- tiempo real -------------------------- */
   function subscribe() {
+    if (channel) { try { sb.removeChannel(channel); } catch (e) {} }
     var ch = sb.channel('paginatoto-db');
+    channel = ch;
     TABLES.concat(['kv']).forEach(function (t) {
       ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, function (payload) { onRemote(t, payload); });
     });
@@ -4098,6 +4204,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   /* ------------------------ guardar (diff + subir) ------------------- */
   function onLocalChange(state) {
     if (applyingRemote) return;
+    if (!navigator.onLine || offlineMode) { offlineMode = true; return; }
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { flush(state); }, 400);
   }
@@ -4118,6 +4225,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function flush(state) {
+    if (!navigator.onLine) { offlineMode = true; return Promise.resolve(false); }
     if (!shadow) shadow = clone(state);
     var ops = { up: { vehicles: [], history: [], reminders: [], fixed_expenses: [], kv: [] },
                 del: { vehicles: [], history: [], reminders: [], fixed_expenses: [], kv: [] } };
@@ -4141,16 +4249,120 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       results.forEach(function (r) { if (r && r.error) bad = r.error; });
       if (bad) throw bad;
       shadow = clone(state);
+      saveBase(state);
       return true;
     }).catch(function (e) {
       console.error('sync flush', e);
+      offlineMode = true;
       App.ui && App.ui.toast('No se pudo guardar en la nube. Revisá internet.', 'error');
-      // reintenta solo en unos segundos (por si fue un corte momentáneo de internet)
+      // Revalida perfil, vuelve a descargar y combina cambios antes de reintentar.
       if (pushTimer) clearTimeout(pushTimer);
-      pushTimer = setTimeout(function () { flush(store.getState()); }, 8000);
+      pushTimer = setTimeout(reconnect, 8000);
       return false;
     });
   }
+
+  function saveBase(state) {
+    try { localStorage.setItem(BASE_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  // Aplicar solamente las diferencias locales posteriores a la última base
+  // conocida sobre la descarga actual evita descartar trabajo offline.
+  function mergeOfflineChanges(remote, local) {
+    var base = null;
+    try { base = JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) {}
+    if (!base) base = store.blankState();
+    var pairs = [
+      ['vehicles', base.vehicles, local.vehicles], ['history', base.history, local.history],
+      ['reminders', base.reminders, local.reminders], ['fixedExpenses', base.fixedExpenses, local.fixedExpenses]
+    ];
+    pairs.forEach(function (pair) {
+      var key = pair[0], before = {}, after = {}, byId = {};
+      (pair[1] || []).forEach(function (x) { before[x.id] = x; });
+      (pair[2] || []).forEach(function (x) { after[x.id] = x; });
+      (remote[key] || []).forEach(function (x) { byId[x.id] = x; });
+      Object.keys(before).forEach(function (id) {
+        if (!Object.prototype.hasOwnProperty.call(after, id)) delete byId[id];
+        else if (j(before[id]) !== j(after[id])) {
+          byId[id] = Object.prototype.hasOwnProperty.call(byId, id)
+            ? mergeRecord(before[id], after[id], byId[id]) : after[id];
+        }
+      });
+      Object.keys(after).forEach(function (id) { if (!before[id]) byId[id] = after[id]; });
+      remote[key] = Object.keys(byId).map(function (id) { return byId[id]; });
+    });
+    ['settings', 'meta'].forEach(function (key) {
+      Object.keys(local[key] || {}).forEach(function (k) {
+        if (j((base[key] || {})[k]) !== j(local[key][k])) remote[key][k] = local[key][k];
+      });
+    });
+    return remote;
+  }
+
+  // Combinar a nivel de campo para que una edición offline de, por ejemplo,
+  // el kilometraje no revierta un cambio remoto simultáneo en el precio.
+  function mergeRecord(base, local, remote) {
+    if (j(base) === j(local)) return remote;
+    if (Array.isArray(base) && Array.isArray(local) && Array.isArray(remote)) {
+      var keyed = base.concat(local, remote).every(function (x) { return x && typeof x === 'object' && x.id; });
+      if (keyed) {
+        var b = {}, l = {}, r = {}, out = {};
+        base.forEach(function (x) { b[x.id] = x; }); local.forEach(function (x) { l[x.id] = x; });
+        remote.forEach(function (x) { r[x.id] = x; });
+        Object.keys(r).forEach(function (id) { out[id] = r[id]; });
+        Object.keys(b).forEach(function (id) {
+          if (!Object.prototype.hasOwnProperty.call(l, id)) delete out[id];
+          else if (j(b[id]) !== j(l[id]) && Object.prototype.hasOwnProperty.call(r, id)) out[id] = mergeRecord(b[id], l[id], r[id]);
+          else if (j(b[id]) !== j(l[id])) out[id] = l[id];
+        });
+        Object.keys(l).forEach(function (id) { if (!b[id]) out[id] = l[id]; });
+        return Object.keys(out).map(function (id) { return out[id]; });
+      }
+      // Arrays de fechas/tags: unir adiciones de ambas partes y aplicar las
+      // eliminaciones locales respecto de la base común.
+      var vals = remote.filter(function (x) { return !base.some(function (v) { return j(v) === j(x); }) || local.some(function (v) { return j(v) === j(x); }); });
+      local.forEach(function (x) { if (!vals.some(function (v) { return j(v) === j(x); })) vals.push(x); });
+      return vals;
+    }
+    if (base && local && remote && !Array.isArray(base) && !Array.isArray(local) && !Array.isArray(remote) &&
+        typeof base === 'object' && typeof local === 'object' && typeof remote === 'object') {
+      var result = clone(remote), keys = {};
+      Object.keys(base).concat(Object.keys(local)).forEach(function (k) { keys[k] = true; });
+      Object.keys(keys).forEach(function (k) {
+        var hadBase = Object.prototype.hasOwnProperty.call(base, k), hasLocal = Object.prototype.hasOwnProperty.call(local, k);
+        if (hadBase && !hasLocal) delete result[k];
+        else if (hasLocal && (!hadBase || j(base[k]) !== j(local[k]))) {
+          if (hadBase && Object.prototype.hasOwnProperty.call(remote, k)) result[k] = mergeRecord(base[k], local[k], remote[k]);
+          else result[k] = local[k];
+        }
+      });
+      return result;
+    }
+    return local;
+  }
+
+  function reconnect() {
+    if (reconnecting || !navigator.onLine || !offlineMode) return;
+    reconnecting = true;
+    App.auth.reloadProfile().then(function (profile) {
+      if (!profile || !profile.activo) {
+        App.auth.logout();
+        return Promise.reject(new Error('La sesión o el usuario ya no están habilitados.'));
+      }
+      if (App.auth.offline) return false;
+      return loadAll();
+    }).catch(function (e) {
+      console.warn('No se pudo recuperar la conexión; se conserva el modo offline.', e);
+    }).then(function () {
+      reconnecting = false;
+      if (offlineMode && navigator.onLine) {
+        if (pushTimer) clearTimeout(pushTimer);
+        pushTimer = setTimeout(reconnect, 10000);
+      }
+    });
+  }
+  window.addEventListener('offline', function () { offlineMode = true; });
+  window.addEventListener('online', reconnect);
 
   /* --------------------------- migración inicial -------------------- */
   function pendingMigrationInfo() {
@@ -4171,6 +4383,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   App.data = {
     loadAll: loadAll,
+    loadLocal: function () {
+      store.load();
+      offlineMode = true;
+      shadow = clone(store.getState());
+      return Promise.resolve(store.getState());
+    },
     onLocalChange: onLocalChange,
     flushNow: function () { if (pushTimer) clearTimeout(pushTimer); return flush(store.getState()); },
     pendingMigrationInfo: pendingMigrationInfo,
@@ -7962,12 +8180,36 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     if (App.auth && App.auth.enabled) {
       // Modo online: login -> cargar datos de la nube -> app
       App.auth.boot(function () {
+        if (App.auth.offline) {
+          App.data.loadLocal().then(function () {
+            startShell();
+            afterBoot();
+          });
+          return;
+        }
         App.data.loadAll().then(function () {
           startShell();
           afterBoot();
           askMigration();
         }).catch(function (err) {
           console.error('No se pudieron cargar los datos:', err);
+          // La sesión ya se validó recién (no es el caso de "nunca inició
+          // sesión"): si esto fue un corte de red justo después del login y
+          // hay datos locales de una sincronización anterior, se sigue
+          // trabajando con esos datos en vez de dejar la app bloqueada.
+          var hayDatosLocales = false;
+          try {
+            var raw = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null');
+            hayDatosLocales = !!raw && ['vehicles', 'history', 'reminders', 'fixedExpenses'].some(function (k) { return Array.isArray(raw[k]) && raw[k].length; });
+          } catch (e) {}
+          if (App.auth.isNetworkError && App.auth.isNetworkError(err) && hayDatosLocales) {
+            App.data.loadLocal().then(function () {
+              startShell();
+              afterBoot();
+              App.ui.toast('No se pudo conectar con la nube. Mostrando la última información guardada.', 'error');
+            });
+            return;
+          }
           document.body.innerHTML = '';
           var box = el('div', { class: 'auth-screen' }, [
             el('div', { class: 'auth-card' }, [

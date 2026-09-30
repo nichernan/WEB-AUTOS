@@ -115,7 +115,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
       console.error('No se pudo guardar el estado:', err);
-      App.ui && App.ui.toast('Error al guardar. ¿Almacenamiento lleno?', 'error');
+      App.ui && App.ui.toast('No se guardaron los cambios en este dispositivo. Exportá una copia y liberá espacio.', 'error');
     }
     // modo online (multi-usuario): además, guardar en la nube
     if (App.data && App.data.onLocalChange) App.data.onLocalChange(state);
