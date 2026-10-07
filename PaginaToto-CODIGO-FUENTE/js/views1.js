@@ -59,60 +59,148 @@
     return arr;
   }
 
-  /* ------------------------------ DASHBOARD --------------------------- */
-  // "Vehículos" (antes "Inicio"). Reutiliza exactamente fin.globalMetrics()
-  // — los mismos datos y fórmulas que ya usan Economía y Resúmenes. Acá solo
-  // se reorganiza la presentación: el stock y las ventas pasan a ser lo
-  // protagonista, y el listado completo (buscador/filtros/orden, sin cambios)
-  // se movió a vehicleListView(), accesible desde acá sin duplicarlo.
+  /* ------------------------------- INICIO ----------------------------- */
+  // "Inicio": centro de control. Un titular que dice cuál es la situación,
+  // la cola de lo que hay que resolver (protagonista), la actividad como línea
+  // de tiempo y, al costado, el resultado del mes y los números del negocio
+  // en formato de libro (no tarjetas). Reutiliza exactamente
+  // fin.globalMetrics() y App.alerts — mismos datos y fórmulas que antes.
+  var TAG_TXT = { overdue: 'Vencida', today: 'Hoy', upcoming: 'Próxima', notice: 'Aviso' };
+  function qRow(it) {
+    return el('a', { class: 'ix-row ix-' + it.status, href: it.href || '#/alertas' }, [
+      el('span', { class: 'ix-tag', text: TAG_TXT[it.status] || '' }),
+      el('span', { class: 'ix-row-body' }, [
+        el('span', { class: 'ix-row-title', text: it.title }),
+        it.meta ? el('span', { class: 'ix-row-meta num', text: it.meta }) : null
+      ]),
+      el('span', { class: 'ix-row-due', text: it.due }),
+      ui.icon('chevron', 'ix-row-go')
+    ]);
+  }
+
+  var ACT_ICON = { compra: 'receipt', venta: 'tag', gasto: 'wrench', cuota: 'card', estado: 'swap', edicion: 'file', 'parte-pago': 'car', papelera: 'file', restaurar: 'swap', otro: 'activity' };
+  function dayLabel(iso) {
+    var r = fmt.relative(iso);
+    if (r === 'hoy') return 'Hoy';
+    if (r === 'ayer') return 'Ayer';
+    return fmt.date(iso);
+  }
+  // Línea de tiempo agrupada por día (se reutiliza en la ficha del vehículo).
+  function feed(evts, withLinks) {
+    var ol = el('ol', { class: 'feed' });
+    var last = null;
+    evts.forEach(function (e) {
+      var d = dayLabel(e.fecha);
+      if (d !== last) { ol.appendChild(el('li', { class: 'feed-day', text: d })); last = d; }
+      var link = withLinks && e.vehicleId && store.getVehicle(e.vehicleId) ? '#/vehiculo/' + e.vehicleId : null;
+      var inner = [
+        el('span', { class: 'feed-dot' }, ui.icon(ACT_ICON[e.tipo] || 'activity')),
+        el('span', { class: 'feed-body' }, [
+          el('span', { class: 'feed-title', text: e.titulo }),
+          e.detalle ? el('span', { class: 'feed-meta', text: e.detalle }) : null
+        ]),
+        e.monto != null ? el('span', { class: 'feed-amt num', text: fmt.money(e.monto, e.moneda) }) : null
+      ];
+      ol.appendChild(el('li', { class: 'feed-i' }, link ? el('a', { class: 'feed-link', href: link }, inner) : el('div', { class: 'feed-link' }, inner)));
+    });
+    return ol;
+  }
+
   function dashboard(root) {
     var g = fin.globalMetrics();
-    var wrap = el('div', { class: 'page home-dashboard' });
+    var wrap = el('div', { class: 'page ix' });
 
-    var alertN = App.alerts ? App.alerts.count() : 0;
-    wrap.appendChild(el('div', { class: 'page-head' }, [
-      el('div', {}, [
-        el('h1', { text: 'Vehículos' }),
-        el('p', { class: 'page-sub', text: 'Tu stock, tus ventas y el estado del negocio' })
+    var queue = (App.alerts && App.alerts.queue) ? App.alerts.queue() : [];
+    var nO = queue.filter(function (q) { return q.status === 'overdue'; }).length;
+    var nT = queue.filter(function (q) { return q.status === 'today'; }).length;
+    var nU = queue.filter(function (q) { return q.status === 'upcoming'; }).length;
+    var nN = queue.filter(function (q) { return q.status === 'notice'; }).length;
+    function em(t) { return el('em', { text: t }); }
+    var headline;
+    if (nO) headline = ['Tenés ', em(nO + (nO === 1 ? ' cosa vencida' : ' cosas vencidas')), nT ? ' y ' + nT + ' para hoy.' : '.'];
+    else if (nT) headline = ['Hoy tenés ', em(nT + (nT === 1 ? ' cosa' : ' cosas')), ' para resolver.'];
+    else headline = ['Todo al día. ', em('Nada urgente'), ' por ahora.'];
+
+    var hoyTxt = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+    hoyTxt = hoyTxt.charAt(0).toUpperCase() + hoyTxt.slice(1);
+    function chip(n, label, tone) { return n ? el('span', { class: 'ix-chip ix-chip-' + tone }, [el('i'), el('b', { class: 'num', text: n }), ' ' + label]) : null; }
+
+    wrap.appendChild(el('header', { class: 'ix-hero' }, [
+      el('div', { class: 'ix-hero-main' }, [
+        el('p', { class: 'ix-eyebrow', text: hoyTxt }),
+        el('h1', { class: 'ix-headline ' + (nO ? 'is-over' : (nT ? 'is-today' : 'is-ok')) }, headline),
+        el('div', { class: 'ix-chips' }, [chip(nO, nO === 1 ? 'vencida' : 'vencidas', 'overdue'), chip(nT, 'para hoy', 'today'), chip(nU, 'próximas (7 días)', 'upcoming'), chip(nN, nN === 1 ? 'aviso' : 'avisos', 'notice')])
       ]),
-      el('div', { class: 'page-head-actions' }, [
-        el('a', { class: 'btn btn-ghost btn-alertas' + (alertN ? ' has-alerts' : ''), href: '#/alertas', 'aria-label': 'Ir a Alertas' + (alertN ? ' (' + alertN + ' pendientes)' : '') }, [
-          el('span', { class: 'btn-alertas-ico', text: '🔔' }),
-          el('span', { text: 'Alertas' }),
-          alertN ? el('span', { class: 'btn-alertas-badge', text: alertN }) : null
-        ]),
-        el('a', { class: 'btn btn-primary', href: '#/vehiculo-nuevo', html: '<span>＋</span> Registrar vehículo' })
-      ])
+      el('a', { class: 'btn btn-primary ix-cta', href: '#/vehiculo-nuevo' }, [ui.icon('plus'), el('span', { text: 'Registrar vehículo' })])
     ]));
 
-    // aviso de copia de seguridad + cuotas vencidas (mismos avisos de siempre)
+    // aviso de copia de seguridad (mismo aviso de siempre)
     wrap.appendChild(App.views._backupBar());
-    if (g.porCobrarVencido > 0 || g.porPagarVencido > 0) {
-      wrap.appendChild(el('a', { class: 'card dash-cuotas-alert', href: '#/cuotas' }, [
-        el('span', { text: '💸' }),
-        el('span', { html:
-          (g.porPagarVencido > 0 ? '<strong>' + fmt.money(g.porPagarVencido) + '</strong> en cuotas vencidas que tenés que pagar. ' : '') +
-          (g.porCobrarVencido > 0 ? '<strong>' + fmt.money(g.porCobrarVencido) + '</strong> en cuotas vencidas que te tienen que pagar.' : '') }),
-        el('span', { class: 'muted', text: 'Ver →' })
-      ]));
+
+    // --- Columna principal: lo que hay que resolver + actividad ---
+    var focus = el('section', { class: 'ix-block ix-focus' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Para resolver ahora' }),
+        el('a', { class: 'ctl-link', href: '#/alertas' }, ['Abrir bandeja', ui.icon('chevron')])
+      ])
+    ]);
+    if (!queue.length) focus.appendChild(el('div', { class: 'ix-clear' }, [ui.icon('check'), el('div', {}, [el('strong', { text: 'Bandeja vacía' }), el('span', { text: 'No hay vencimientos ni avisos pendientes.' })])]));
+    else focus.appendChild(el('div', { class: 'ix-rows' }, queue.slice(0, 7).map(qRow)));
+    if (queue.length > 7) focus.appendChild(el('a', { class: 'ix-more', href: '#/alertas', text: 'Ver las ' + (queue.length - 7) + ' restantes' }));
+
+    var evts = store.getHistory().slice(0, 8);
+    var act = el('section', { class: 'ix-block ix-activity' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Actividad reciente' }),
+        el('a', { class: 'ctl-link', href: '#/historial' }, ['Historial completo', ui.icon('chevron')])
+      ]),
+      evts.length ? feed(evts, true) : el('p', { class: 'form-help', text: 'Todavía no hay movimientos.' })
+    ]);
+
+    // --- Columna lateral: resultado del mes + libro de números + stock viejo ---
+    var mes = g.resultadoNetoDelMes;
+    var result = el('a', { class: 'ix-result', href: '#/economia' }, [
+      el('span', { class: 'ix-result-label', text: 'Resultado del mes' }),
+      el('span', { class: 'ix-result-value num ' + (mes >= 0 ? 'pos' : 'neg'), text: (mes >= 0 ? '+' : '−') + fmt.money(Math.abs(mes)) }),
+      el('span', { class: 'ix-result-sub', text: 'Ganancias menos gastos fijos' })
+    ]);
+    function led(label, sub, value, o) {
+      o = o || {};
+      return el('a', { class: 'ix-led', href: o.href || '#/', onclick: o.onclick }, [
+        el('span', { class: 'ix-led-l' }, [el('b', { text: label }), el('small', { class: o.subTone || '', text: sub })]),
+        el('span', { class: 'ix-led-v num', text: value })
+      ]);
     }
+    var ledger = el('div', { class: 'ix-ledger' }, [
+      led('En stock', g.autosEnStock + (g.autosEnStock === 1 ? ' vehículo' : ' vehículos') + ' · invertido', fmt.money(g.capitalInvertido), { href: '#/vehiculos', onclick: function (e) { e.preventDefault(); goVehiculos('no'); } }),
+      led('Por cobrar', g.porCobrarVencido > 0 ? 'Vencido ' + fmt.money(g.porCobrarVencido) : 'Sin vencidos', fmt.money(g.porCobrar), { href: '#/cuotas', subTone: g.porCobrarVencido > 0 ? 'neg' : '' }),
+      led('Por pagar', g.porPagarVencido > 0 ? 'Vencido ' + fmt.money(g.porPagarVencido) : 'Sin vencidos', fmt.money(g.porPagarCuotas), { href: '#/cuotas', subTone: g.porPagarVencido > 0 ? 'neg' : '' })
+    ]);
 
-    // --- Lo primero: cuántos autos tengo y cuántos vendí (protagonistas,
-    // clickeables — llevan al listado completo ya filtrado). ---
-    wrap.appendChild(el('div', { class: 'grid-2' }, [
-      heroLink('Autos en stock', fmt.num(g.autosEnStock), 'Ver vehículos →', function () { goVehiculos('no'); }),
-      heroLink('Autos vendidos', fmt.num(g.autosVendidos), 'Ver vendidos →', function () { goVehiculos('si'); })
-    ]));
+    var limite = store.getState().settings.diasStockAlerta;
+    var oldest = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
+      .map(function (v) { return { v: v, m: fin.vehicleMetrics(v) }; })
+      .filter(function (x) { return x.m.diasEnStock != null; })
+      .sort(function (a, b) { return b.m.diasEnStock - a.m.diasEnStock; }).slice(0, 4);
+    var old = el('section', { class: 'ix-block ix-oldest' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Más tiempo en stock' }),
+        el('a', { class: 'ctl-link', href: '#/vehiculos' }, ['Inventario', ui.icon('chevron')])
+      ]),
+      oldest.length ? el('div', { class: 'old-list' }, oldest.map(function (x) {
+        var d = x.m.diasEnStock, pct = Math.min(100, Math.round(d / (limite * 1.5) * 100));
+        return el('a', { class: 'old-row', href: '#/vehiculo/' + x.v.id }, [
+          x.v.patente ? el('span', { class: 'plate plate-sm', text: x.v.patente }) : el('span', { class: 'plate plate-sm', text: '—' }),
+          el('span', { class: 'old-name', text: [x.v.marca, x.v.modelo].filter(Boolean).join(' ') || store.vehicleName(x.v) }),
+          el('span', { class: 'meter' + (d >= limite ? ' is-old' : ''), 'aria-hidden': 'true' }, el('i', { style: 'width:' + pct + '%' })),
+          el('span', { class: 'old-days num' + (d >= limite ? ' is-old' : ''), text: fmt.days(d) })
+        ]);
+      })) : el('p', { class: 'form-help', text: 'No hay vehículos en stock.' })
+    ]);
 
-    // --- Después: cómo está el resultado y el capital (informativo, más discreto) ---
-    wrap.appendChild(el('div', { class: 'grid-2' }, [
-      miniStatHome('Resultado del mes', (g.resultadoNetoDelMes >= 0 ? '+' : '') + fmt.money(g.resultadoNetoDelMes), 'Ganancias − gastos fijos', g.resultadoNetoDelMes >= 0 ? 'pos' : 'neg'),
-      miniStatHome('Capital invertido', fmt.money(g.capitalInvertido), 'Compra + gastos + comisiones')
-    ]));
-
-    // --- Acceso al listado completo (buscador, filtros, orden — sin duplicarlo) ---
-    wrap.appendChild(el('div', { class: 'center' }, [
-      el('a', { class: 'btn btn-ghost', href: '#/vehiculos', text: 'Ver todos los vehículos →' })
+    wrap.appendChild(el('div', { class: 'ix-grid' }, [
+      el('div', { class: 'ix-col-main' }, [focus, act]),
+      el('aside', { class: 'ix-col-side' }, [result, ledger, old])
     ]));
 
     root.appendChild(wrap);
@@ -127,39 +215,40 @@
     App.router.go('vehiculos');
   }
 
-  // Bloque grande y clickeable (mismo estilo "hero" que ya usa Economía para
-  // el Resultado del negocio), con una acción por debajo tipo link.
-  function heroLink(label, value, actionText, onclick) {
-    return el('div', { class: 'econ-hero econ-hero-link', onclick: onclick, role: 'button', tabindex: '0' }, [
-      el('span', { class: 'econ-hero-label', text: label }),
-      el('span', { class: 'econ-hero-value', text: value }),
-      el('span', { class: 'mini-tag', text: actionText })
-    ]);
+  /* ----------------------- VEHÍCULOS (inventario) ---------------------- */
+  // Inventario automotor (DMS): patente como identificador, filas rápidas de
+  // escanear, medidor de días en stock y números alineados. Sin fotos. Mismo
+  // buscador/filtros/orden de siempre (matchVehicle, sortVehicles,
+  // buildFiltersPanel); solo cambia cómo se presenta el listado.
+  var INV_TABS = [['todos', 'Todos'], ['stock', 'En stock'], ['reservado', 'Reservados'], ['vendido', 'Vendidos']];
+  function invTab() {
+    if (filters.estado) return filters.estado === 'reservado' ? 'reservado' : (filters.estado === 'vendido' ? 'vendido' : '');
+    if (filters.vendido === 'si') return 'vendido';
+    if (filters.vendido === 'no') return 'stock';
+    return 'todos';
+  }
+  function setInvTab(t) {
+    filters.estado = ''; filters.vendido = '';
+    if (t === 'stock') filters.vendido = 'no';
+    else if (t === 'reservado') filters.estado = 'reservado';
+    else if (t === 'vendido') filters.vendido = 'si';
+  }
+  function invCount(t, all) {
+    if (t === 'todos') return all.length;
+    return all.filter(function (v) {
+      return t === 'stock' ? v.estado !== 'vendido' : v.estado === t;
+    }).length;
   }
 
-  // Mismo componente visual "mini-stat" que ya usa Economía — se reutiliza acá.
-  function miniStatHome(label, value, sub, tone) {
-    return el('div', { class: 'mini-stat' }, [
-      el('span', { class: 'mini-stat-label', text: label }),
-      el('span', { class: 'mini-stat-value ' + (tone || ''), text: value }),
-      sub ? el('span', { class: 'mini-stat-sub', text: sub }) : null
-    ]);
-  }
-
-  /* --------------------- Listado completo de vehículos ----------------- */
-  // Mismo buscador/filtros/orden/listado que antes vivía dentro de "Inicio"
-  // (matchVehicle, sortVehicles, buildFiltersPanel, vehicleRow — sin cambios),
-  // ahora en su propia pantalla para no duplicar información en el dashboard.
   function vehicleListView(root) {
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(el('div', { class: 'page-head' }, [
-      el('div', {}, [
-        el('a', { class: 'back-link', href: '#/', html: '‹ Volver a Vehículos' }),
-        el('h1', { text: 'Todos los vehículos', style: 'margin-top:6px' })
-      ])
+    var wrap = el('div', { class: 'page dms' });
+    var stats = el('p', { class: 'dms-stats' });
+    wrap.appendChild(el('header', { class: 'dms-head' }, [
+      el('div', {}, [el('h1', { text: 'Vehículos' }), stats]),
+      el('a', { class: 'btn btn-primary', href: '#/vehiculo-nuevo' }, [ui.icon('plus'), el('span', { text: 'Registrar vehículo' })])
     ]));
 
-    var searchInput = ui.input({ value: filters.q, placeholder: 'Buscar por marca, modelo, año, patente, nombre...', class: 'input search-input' });
+    var searchInput = ui.input({ value: filters.q, placeholder: 'Buscar por marca, modelo, año o patente', class: 'input search-input' });
     searchInput.addEventListener('input', function () { filters.q = searchInput.value; renderList(); });
     var sortSel = ui.select([
       { value: 'reciente', label: 'Más reciente' }, { value: 'antiguo', label: 'Más antiguo' },
@@ -169,36 +258,123 @@
     sortSel.addEventListener('change', function () { filters.sort = sortSel.value; renderList(); });
 
     var filtersPanel = el('div', { class: 'filters-panel', hidden: true });
-    var filterToggle = el('button', { class: 'btn btn-ghost', html: '⚙ Filtros', onclick: function () { filtersPanel.hidden = !filtersPanel.hidden; } });
+    var filterToggle = el('button', { class: 'btn btn-ghost', type: 'button', onclick: function () { filtersPanel.hidden = !filtersPanel.hidden; } }, [ui.icon('filter'), el('span', { text: 'Filtros' })]);
 
-    wrap.appendChild(el('div', { class: 'toolbar' }, [
-      el('div', { class: 'toolbar-search' }, searchInput),
-      el('div', { class: 'toolbar-actions' }, [filterToggle, sortSel])
+    wrap.appendChild(el('div', { class: 'dms-bar' }, [
+      el('label', { class: 'dms-search' }, [ui.icon('search'), searchInput]),
+      el('div', { class: 'dms-bar-actions' }, [filterToggle, sortSel])
     ]));
     buildFiltersPanel(filtersPanel, function () { renderList(); });
     wrap.appendChild(filtersPanel);
 
-    var listWrap = el('div', { class: 'vehicle-list' });
-    wrap.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'card-head' }, [
-        el('h3', { text: 'Todos los vehículos' }),
-        el('span', { class: 'count-tag', id: 'veh-count' })
-      ]),
-      listWrap
-    ]));
+    // vistas por estado (con contadores)
+    var tabBtns = INV_TABS.map(function (t) {
+      var b = el('button', { type: 'button', class: 'dms-view', dataset: { tab: t[0] } }, [t[1], el('span', { class: 'dms-view-n num' })]);
+      b.addEventListener('click', function () {
+        setInvTab(t[0]);
+        buildFiltersPanel(filtersPanel, function () { renderList(); });
+        renderList();
+      });
+      return b;
+    });
+    wrap.appendChild(el('div', { class: 'dms-views', role: 'tablist' }, tabBtns));
+
+    var tableBox = el('div', { class: 'dms-scroll' });
+    var foot = el('div', { class: 'dms-foot' });
+    wrap.appendChild(el('div', { class: 'dms-sheet' }, [tableBox, foot]));
 
     function renderList() {
       var all = store.activeVehicles();
       var list = sortVehicles(all.filter(matchVehicle));
-      ui.clear(listWrap);
-      var countEl = ui.qs('#veh-count', wrap);
-      if (countEl) countEl.textContent = list.length + ' de ' + all.length;
-      if (!list.length) { listWrap.appendChild(ui.emptyState('No hay vehículos que coincidan con la búsqueda.', '🔍')); return; }
-      list.forEach(function (v) { listWrap.appendChild(vehicleRow(v)); });
+      var cur = invTab();
+      tabBtns.forEach(function (b) {
+        var t = b.dataset.tab;
+        b.classList.toggle('is-active', t === cur);
+        b.setAttribute('aria-selected', t === cur ? 'true' : 'false');
+        b.querySelector('.dms-view-n').textContent = invCount(t, all);
+      });
+      var enStock = all.filter(function (v) { return v.estado !== 'vendido'; });
+      var inv = 0; enStock.forEach(function (v) { inv += fin.vehicleMetrics(v).costoTotalARS; });
+      stats.textContent = '';
+      [all.length + (all.length === 1 ? ' unidad' : ' unidades'), enStock.length + ' en stock', fmt.money(inv) + ' invertidos'].forEach(function (t, i) {
+        if (i) stats.appendChild(el('i', { 'aria-hidden': 'true' }));
+        stats.appendChild(el('span', { class: 'num', text: t }));
+      });
+      ui.clear(tableBox); ui.clear(foot);
+      if (!list.length) { tableBox.appendChild(ui.emptyState('No hay vehículos que coincidan con la búsqueda.', 'search')); return; }
+      tableBox.appendChild(inventoryTable(list));
+      var invStock = 0, gan = 0, nGan = 0;
+      list.forEach(function (v) {
+        var m = fin.vehicleMetrics(v);
+        if (v.estado !== 'vendido') invStock += m.costoTotalARS;
+        else { gan += m.gananciaARS; nGan++; }
+      });
+      foot.appendChild(el('span', { text: 'Mostrando ' + list.length + ' de ' + all.length }));
+      foot.appendChild(el('span', {}, ['Invertido en stock ', el('strong', { class: 'num', text: fmt.money(invStock) })]));
+      if (nGan) foot.appendChild(el('span', {}, ['Ganancia de vendidos ', el('strong', { class: 'num ' + (gan >= 0 ? 'pos' : 'neg'), text: (gan >= 0 ? '+' : '−') + fmt.money(Math.abs(gan)) })]));
     }
     renderList();
 
     root.appendChild(wrap);
+  }
+
+  function inventoryTable(list) {
+    var table = el('table', { class: 'dms-table' });
+    table.appendChild(el('thead', {}, el('tr', {}, [
+      el('th', { class: 'c-pat', text: 'Patente' }),
+      el('th', { class: 'c-veh', text: 'Vehículo' }),
+      el('th', { class: 'c-anio num', text: 'Año' }),
+      el('th', { class: 'c-est', text: 'Estado' }),
+      el('th', { class: 'c-dias', text: 'Días en stock' }),
+      el('th', { class: 'c-costo num', text: 'Costo' }),
+      el('th', { class: 'c-res num', text: 'Resultado' }),
+      el('th', { class: 'c-go', 'aria-hidden': 'true' })
+    ])));
+    var limite = store.getState().settings.diasStockAlerta;
+    var tb = el('tbody');
+    list.forEach(function (v) { tb.appendChild(inventoryRow(v, limite)); });
+    table.appendChild(tb);
+    return table;
+  }
+
+  function inventoryRow(v, limite) {
+    var m = fin.vehicleMetrics(v);
+    var avisos = App.alerts ? App.alerts.forVehicle(v).filter(function (a) { return a.level !== 'info'; }).length : 0;
+    var res;
+    if (m.vendido) {
+      res = el('span', { class: m.gananciaARS >= 0 ? 'pos' : 'neg', text: (m.gananciaARS >= 0 ? '+' : '−') + fmt.money(Math.abs(m.gananciaARS)) });
+    } else if (v.precioPretendido) {
+      var pot = m.estimadoARS - m.costoTotalARS;
+      res = el('span', { class: 'inv-pot ' + (pot >= 0 ? 'pos' : 'neg'), title: 'Ganancia potencial (precio pretendido − costo)', text: (pot >= 0 ? '+' : '−') + fmt.money(Math.abs(pot)) });
+    } else {
+      res = el('span', { class: 'muted', text: '—' });
+    }
+    var nombre = [v.marca, v.modelo].filter(Boolean).join(' ') || store.vehicleName(v);
+    var sub = [v.version, v.km != null ? fmt.num(v.km) + ' km' : null].filter(Boolean).join(' · ');
+    var href = '#/vehiculo/' + v.id;
+    var dias = m.diasEnStock;
+    var viejo = v.estado !== 'vendido' && dias != null && dias >= limite;
+    var pct = dias == null ? 0 : Math.min(100, Math.round(dias / (limite * 1.5) * 100));
+    return el('tr', { class: 'dms-row st-' + v.estado, onclick: function (e) { if (e.target.closest('a')) return; location.hash = href; } }, [
+      el('td', { class: 'c-pat' }, v.patente ? el('span', { class: 'plate', text: v.patente }) : el('span', { class: 'plate plate-empty', text: 'S/P' })),
+      el('td', { class: 'c-veh' }, el('a', { class: 'dms-name', href: href }, [
+        el('span', { class: 'dms-name-main', text: nombre }),
+        sub ? el('span', { class: 'dms-name-sub', text: sub }) : null
+      ])),
+      el('td', { class: 'c-anio num', dataset: { label: 'Año' }, text: v.anio || '—' }),
+      el('td', { class: 'c-est' }, [
+        ui.estadoBadge(v.estado),
+        (v.origin && v.origin.type === 'consignacion') ? el('span', { class: 'pill', text: 'Consignación' }) : null,
+        avisos ? el('span', { class: 'inv-flag', title: avisos + (avisos === 1 ? ' aviso' : ' avisos') }, [ui.icon('alert'), String(avisos)]) : null
+      ]),
+      el('td', { class: 'c-dias' + (viejo ? ' is-old' : ''), dataset: { label: 'Días en stock' } }, dias == null ? '—' : [
+        el('span', { class: 'meter' + (viejo ? ' is-old' : ''), 'aria-hidden': 'true' }, el('i', { style: 'width:' + pct + '%' })),
+        el('span', { class: 'num', text: fmt.days(dias) })
+      ]),
+      el('td', { class: 'c-costo num', dataset: { label: 'Costo' }, text: m.costoTotalARS ? fmt.money(m.costoTotalARS) : '—' }),
+      el('td', { class: 'c-res num', dataset: { label: 'Resultado' } }, res),
+      el('td', { class: 'c-go', 'aria-hidden': 'true' }, ui.icon('chevron'))
+    ]);
   }
 
   function vehicleRow(v) {
@@ -294,12 +470,32 @@
     return wrapEl;
   }
 
+  // Etapa del vehículo para el indicador de la ficha (solo presentación:
+  // se deduce del estado y de si ya tiene compra registrada).
+  var ETAPAS = ['Alta', 'En stock', 'Reservado', 'Vendido'];
+  function etapaActual(v, esConsig) {
+    if (v.estado === 'vendido') return 3;
+    if (v.estado === 'reservado') return 2;
+    return (v.purchase || esConsig) ? 1 : 0;
+  }
+  function stepper(v, esConsig) {
+    var cur = etapaActual(v, esConsig);
+    return el('ol', { class: 'stepper', 'aria-label': 'Etapa del vehículo' }, ETAPAS.map(function (name, i) {
+      var cls = 'step' + (i < cur || (i === cur && cur === 3) ? ' is-done' : '') + (i === cur && cur !== 3 ? ' is-current' : '');
+      var label = (i === 0 && cur === 0) ? 'Alta · falta la compra' : name;
+      return el('li', { class: cls }, [
+        el('span', { class: 'step-dot' }, (i < cur || (i === cur && cur === 3)) ? ui.icon('check') : String(i + 1)),
+        el('span', { class: 'step-lbl', text: label })
+      ]);
+    }));
+  }
+
   function vehicleDetail(root, id) {
     var v = store.getVehicle(id);
     if (!v) { root.appendChild(ui.emptyState('El vehículo no existe o fue eliminado.', '🚫')); return; }
     var m = fin.vehicleMetrics(v);
     var esConsignacion = !!(v.origin && v.origin.type === 'consignacion');
-    var wrap = el('div', { class: 'page vehicle-detail' });
+    var wrap = el('div', { class: 'page vehicle-detail fx' });
 
     // acción principal: registrar compra (si falta y no es consignación) o
     // registrar venta (si ya se puede vender); "Agregar gasto" siempre
@@ -318,36 +514,58 @@
       { text: 'Comparar dólar', onclick: function () { App.router.go('comparacion/' + v.id); } },
       { text: 'Papelera', danger: true, onclick: function () {
         ui.confirm({ title: 'Enviar a papelera', message: '¿Seguro que querés eliminar este vehículo? Se moverá a la Papelera y podrás restaurarlo.', danger: true, confirmText: 'Enviar a papelera' })
-          .then(function (ok) { if (ok) { store.softDeleteVehicle(v.id); ui.toast('Movido a la papelera', 'success'); App.router.go(''); } });
+          .then(function (ok) { if (ok) { store.softDeleteVehicle(v.id); ui.toast('Movido a la papelera', 'success'); App.router.go('vehiculos'); } });
       } }
     ]);
 
-    // header
-    wrap.appendChild(el('div', { class: 'detail-head' }, [
-      el('a', { class: 'back-link', href: '#/', html: '‹ Volver' }),
-      el('div', { class: 'detail-head-main' }, [
-        el('div', { class: 'detail-hero-photo' }, ui.carIcon('big')),
-        el('div', { class: 'detail-titles' }, [
+    // --- Expediente: identidad + etapa + 4 cifras + acciones ---
+    var subBits = [v.version, v.km != null ? fmt.num(v.km) + ' km' : null].filter(Boolean);
+    var limite = store.getState().settings.diasStockAlerta;
+    var resultadoKpi;
+    if (m.vendido) {
+      resultadoKpi = kpi('Ganancia', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), 'Rentabilidad ' + fmt.pct(m.rentabilidad), m.gananciaARS >= 0 ? 'pos' : 'neg');
+    } else if (v.precioPretendido) {
+      var pot = m.estimadoARS - m.costoTotalARS;
+      resultadoKpi = kpi('Ganancia potencial', (pot >= 0 ? '+' : '') + fmt.money(pot), 'Si se vende al precio pretendido', pot >= 0 ? 'pos' : 'neg');
+    } else {
+      resultadoKpi = kpi('Ganancia potencial', '—', 'Cargá el precio pretendido');
+    }
+    var precioKpi = m.vendido
+      ? kpi('Precio de venta', fmt.money(m.ventaARS), v.sale && v.sale.fecha ? 'Vendido el ' + fmt.date(v.sale.fecha) : '')
+      : kpi('Precio pretendido', v.precioPretendido ? fmt.money(v.precioPretendido, v.precioPretendidoMoneda) : '—', v.precioPretendido ? '' : 'Sin cargar');
+    var viejo = v.estado !== 'vendido' && m.diasEnStock != null && m.diasEnStock >= limite;
+    var kpis = [
+      kpi('Inversión', fmt.money(m.costoTotalARS), 'Compra + gastos + comisiones'),
+      precioKpi,
+      resultadoKpi,
+      kpi('Días en stock', fmt.days(m.diasEnStock), viejo ? 'Supera los ' + limite + ' días' : '', viejo ? 'old' : '')
+    ];
+
+    wrap.appendChild(el('section', { class: 'fx-head' }, [
+      el('div', { class: 'fx-top' }, [
+        el('a', { class: 'fx-back', href: '#/vehiculos' }, [ui.icon('back'), el('span', { text: 'Inventario' })]),
+        el('div', { class: 'detail-actions' }, primaryActions.concat([secondary]))
+      ]),
+      el('div', { class: 'fx-id' }, [
+        v.patente ? el('span', { class: 'plate plate-xl', text: v.patente }) : el('span', { class: 'plate plate-xl plate-empty', text: 'Sin patente' }),
+        el('div', { class: 'fx-id-txt' }, [
           el('h1', { text: store.vehicleName(v) }),
-          el('div', { class: 'detail-patente', text: v.patente || 'Sin patente' }),
-          el('div', { class: 'detail-sub' }, [
+          subBits.length ? el('p', { class: 'fx-sub', text: subBits.join(' · ') }) : null,
+          el('div', { class: 'fx-badges' }, [
             ui.estadoBadge(v.estado), ui.docBadge(v.documentacion),
             v.origin && v.origin.type === 'parte-de-pago' ? ui.pill('Recibido como parte de pago', 'pill-info') : null,
-            esConsignacion ? ui.pill('🤝 Consignación', 'pill-warn') : null
+            esConsignacion ? ui.pill('Consignación') : null
           ])
         ])
       ]),
-      el('div', { class: 'detail-invest' }, [
-        el('span', { class: 'detail-invest-value', text: fmt.money(m.costoTotalARS) }),
-        el('span', { class: 'detail-invest-label', text: 'Inversión actual' })
-      ]),
-      el('div', { class: 'detail-actions' }, primaryActions.concat([secondary]))
+      stepper(v, esConsignacion),
+      el('div', { class: 'fx-figures' }, kpis)
     ]));
 
     if (v.reservation) {
       var rr = v.reservation;
       wrap.appendChild(el('div', { class: 'card reserva-card' }, [
-        el('div', { class: 'card-head' }, [el('h4', { text: '🔖 Reservado' }), el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar', onclick: function () { App.forms.reservationForm(v.id); } })]),
+        el('div', { class: 'card-head' }, [el('h4', {}, [ui.icon('bookmark'), 'Reservado']), el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar', onclick: function () { App.forms.reservationForm(v.id); } })]),
         App.views._dl([
           ['Seña recibida', fmt.money(rr.monto, rr.moneda), 'strong'],
           ['Fecha de la reserva', fmt.date(rr.fecha)],
@@ -362,7 +580,7 @@
     var va = App.alerts ? App.alerts.forVehicle(v) : [];
     if (va.length) {
       wrap.appendChild(el('div', { class: 'detail-alerts' }, va.map(function (a) {
-        return el('div', { class: 'alert-line alert-' + a.level }, [el('span', { text: a.icon || '⚠' }), el('span', { text: a.text })]);
+        return el('div', { class: 'alert-line alert-' + a.level }, [ui.icon(a.level === 'info' ? 'file' : 'alert'), el('span', { text: a.text })]);
       })));
     }
 
@@ -391,10 +609,24 @@
       } });
       tabsWrap.appendChild(b);
     });
-    wrap.appendChild(tabsWrap);
-    wrap.appendChild(panel);
     var initial = tabs.filter(function (t) { return t[0] === active; })[0] || tabs[0];
     ui.appendChildren(panel, initial[2]());
+
+    // --- Actividad relacionada con este vehículo (columna lateral) ---
+    var evts = store.getHistory().filter(function (h) { return h.vehicleId === v.id; }).slice(0, 8);
+    var side = el('section', { class: 'fx-side-block' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Línea de tiempo' }),
+        evts.length ? el('a', { class: 'ctl-link', href: '#', onclick: function (e) { e.preventDefault(); lastDetailTab = { id: id, tab: 'hist' }; App.router.render(); } }, ['Ver todo', ui.icon('chevron')]) : null
+      ]),
+      m.proximaCuota ? el('div', { class: 'exp-next' }, [ui.icon('calendar'), el('span', { text: 'Próxima cuota a pagar: ' + fmt.date(m.proximaCuota.vencimiento) + ' (' + fmt.relative(m.proximaCuota.vencimiento) + ')' })]) : null,
+      evts.length ? feed(evts, false) : el('p', { class: 'form-help', text: 'Sin movimientos registrados.' })
+    ]);
+
+    wrap.appendChild(el('div', { class: 'fx-grid' }, [
+      el('div', { class: 'fx-main' }, [tabsWrap, panel]),
+      el('aside', { class: 'fx-side' }, side)
+    ]));
 
     root.appendChild(wrap);
   }
@@ -434,7 +666,7 @@
       rows.push(['Ganancia realizada', (m.gananciaARS >= 0 ? '+' : '') + fmt.money(m.gananciaARS), m.gananciaARS >= 0 ? 'pos strong' : 'neg strong']);
     }
     return el('div', { class: 'card info-card' }, [
-      el('h4', { text: '🔁 Origen: parte de pago' }),
+      el('h4', { text: 'Origen: parte de pago' }),
       dl(rows),
       orig ? el('a', { class: 'btn btn-sm btn-primary', href: '#/vehiculo/' + orig.id + '?tab=economia', text: 'Ver operación' }) : null
     ]);
@@ -466,7 +698,7 @@
       }
     }
     return el('div', { class: 'card info-card' }, [
-      el('h4', { text: '🤝 Consignación' }),
+      el('h4', { text: 'Consignación' }),
       dl(rows)
     ]);
   }
@@ -524,7 +756,7 @@
 
   function tabCompra(v, m) {
     if (v.origin && v.origin.type === 'consignacion') return [consignacionCard(v, m)];
-    if (!v.purchase) return [ui.emptyState('Todavía no registraste la compra de este vehículo.', '🧾'), el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }))];
+    if (!v.purchase) return [ui.emptyState('Todavía no registraste la compra de este vehículo.', 'receipt'), el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar compra', onclick: function () { App.forms.purchaseForm(v.id); } }))];
     var p = v.purchase;
     var out = [el('div', { class: 'card-actions-head' }, [el('h4', { text: 'Compra' }), el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar compra', onclick: function () { App.forms.purchaseForm(v.id); } })])];
     out.push(dl([
@@ -554,7 +786,7 @@
         var pillTxt = c.pagada ? 'Pagada' : (vencida ? 'Vencida' : 'Pendiente');
         var pillCls = c.pagada ? 'pill-ok' : (vencida ? 'pill-danger' : 'pill-warn');
         return el('div', { class: 'rem-item rem-auto' + (vencida ? ' rem-overdue' : '') + (c.pagada ? ' is-done' : '') }, [
-          el('span', { class: 'rem-ico rem-auto-ico', text: '💳' }),
+          el('span', { class: 'rem-ico rem-auto-ico' }, ui.icon('card')),
           el('div', { class: 'rem-item-body' }, [
             el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: 'Cuota ' + c.numero }), ui.pill(pillTxt, pillCls)]),
             el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, p.moneda) + ' · Vence ' + fmt.date(c.vencimiento) + (c.fechaPago ? ' · Pagada el ' + fmt.date(c.fechaPago) : '') })
@@ -604,7 +836,7 @@
     if (!(v.expenses || []).length) { out.push(ui.emptyState('Sin gastos registrados todavía.', '💸')); return out; }
     out.push(el('div', { class: 'rem-list' }, v.expenses.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).map(function (e) {
       return el('div', { class: 'rem-item rem-auto' }, [
-        el('span', { class: 'rem-ico rem-auto-ico', text: '💸' }),
+        el('span', { class: 'rem-ico rem-auto-ico' }, ui.icon('wrench')),
         el('a', { class: 'rem-item-body', href: '#', onclick: function (ev) { ev.preventDefault(); App.forms.expenseForm(v.id, e); } }, [
           el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: fmt.money(e.monto, e.moneda) })]),
           el('div', { class: 'rem-item-meta', text: fmt.date(e.fecha) + (e.observacion ? ' · ' + e.observacion : '') })
@@ -616,7 +848,7 @@
   }
 
   function tabVenta(v, m) {
-    if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', '🧾')];
+    if (!v.purchase && !(v.origin && v.origin.type === 'consignacion')) return [ui.emptyState('Registrá primero la compra para poder vender el vehículo.', 'receipt')];
     if (!v.sale) return [
       ui.emptyState('Este vehículo todavía no fue vendido.', '🏷️'),
       el('div', { class: 'center' }, el('button', { class: 'btn btn-primary', text: 'Registrar venta', onclick: function () { App.forms.saleForm(v.id); } }))
@@ -658,7 +890,7 @@
         var pillTxt = c.cobrada ? 'Cobrada' : (venc ? 'Vencida' : 'Pendiente');
         var pillCls = c.cobrada ? 'pill-ok' : (venc ? 'pill-danger' : 'pill-warn');
         return el('div', { class: 'rem-item rem-auto' + (venc ? ' rem-overdue' : '') + (c.cobrada ? ' is-done' : '') }, [
-          el('span', { class: 'rem-ico rem-auto-ico', text: '💰' }),
+          el('span', { class: 'rem-ico rem-auto-ico' }, ui.icon('dollar')),
           el('div', { class: 'rem-item-body' }, [
             el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: 'Cuota ' + c.numero }), ui.pill(pillTxt, pillCls)]),
             el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, f.moneda) + ' · Vence ' + fmt.date(c.vencimiento) + (c.fechaCobro ? ' · Cobrada el ' + fmt.date(c.fechaCobro) : '') })

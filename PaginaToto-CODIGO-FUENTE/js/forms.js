@@ -462,18 +462,60 @@
       masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
     } });
 
-    var body = el('div', { class: 'form-grid' }, [
-      el('div', { class: 'grid-2' }, [
-        ui.field('Fecha de compra', fFecha),
-        ui.field('Precio de compra', precio.wrap)
+    // --- Composición "documento de adquisición": encabezado + secciones
+    // numeradas + total. Los mismos campos y la misma validación de siempre. ---
+    var docHead = el('div', { class: 'doc-head' }, [
+      el('div', { class: 'doc-eyebrow', text: 'Documento de adquisición' }),
+      el('div', { class: 'doc-title-row' }, [
+        el('h2', { class: 'doc-title', text: store.vehicleName(v) }),
+        v.patente ? el('span', { class: 'plate', text: v.patente }) : null
       ]),
-      cotizField,
-      el('div', { class: 'form-section-title', text: 'Forma de pago' }),
-      ui.field('', fForma),
-      mixtoBox,
-      cuotasSection,
-      masDatosToggle, masDatosBox
+      el('div', { class: 'doc-meta', text: [v.version, v.km != null ? App.fmt.num(v.km) + ' km' : null].filter(Boolean).join(' · ') })
     ]);
+    function docSec(n, title, kids) {
+      return el('section', { class: 'doc-sec' }, [
+        el('div', { class: 'doc-sec-head' }, [el('span', { class: 'doc-sec-n', text: String(n) }), el('h4', { text: title })]),
+        el('div', { class: 'doc-sec-body form-grid' }, kids)
+      ]);
+    }
+    var totals = el('div', { class: 'doc-totals' });
+    function updateTotals() {
+      var mon = precio.moneda.value;
+      var tot = store.num(precio.monto.value);
+      var rows = [['Precio de compra', tot > 0 ? App.fmt.money(tot, mon) : '—'], ['Forma de pago', store.formaPagoLabel(fForma.value)]];
+      if (fForma.value === 'cuotas') {
+        var cs = [];
+        try { cs = cb.getCuotas() || []; } catch (e) { cs = []; }
+        var sum = cs.reduce(function (a, c) { return a + store.num(c.monto); }, 0);
+        rows.push(['Cuotas', cs.length + (cs.length === 1 ? ' cuota' : ' cuotas') + (sum ? ' · ' + App.fmt.money(sum, mon) : '')]);
+      }
+      ui.clear(totals);
+      rows.forEach(function (r) { totals.appendChild(el('div', { class: 'doc-line' }, [el('span', { text: r[0] }), el('span', { class: 'num', text: r[1] })])); });
+      totals.appendChild(el('div', { class: 'doc-total' }, [el('span', { text: 'Total de la operación' }), el('strong', { class: 'num', text: tot > 0 ? App.fmt.money(tot, mon) : '—' })]));
+    }
+
+    var secs = [
+      docSec(1, 'Operación', [
+        el('div', { class: 'grid-2' }, [ui.field('Fecha de compra', fFecha), ui.field('Precio de compra', precio.wrap)]),
+        cotizField
+      ]),
+      docSec(2, 'Forma de pago', [ui.field('', fForma), mixtoBox, cuotasSection]),
+      docSec(3, 'Vendedor y comisión', [masDatosToggle, masDatosBox])
+    ];
+    var STEPS = [['Operación', 'Fecha, precio y cotización'], ['Forma de pago', 'Transferencia, efectivo o cuotas'], ['Vendedor y comisión', 'Datos opcionales']];
+    var stepBtns = STEPS.map(function (t, i) {
+      return el('button', { type: 'button', class: 'doc-step' + (i === 0 ? ' is-active' : ''), onclick: function () { secs[i].scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, [
+        el('span', { class: 'doc-step-n', text: String(i + 1) }),
+        el('span', { class: 'doc-step-t' }, [el('b', { text: t[0] }), el('small', { text: t[1] })])
+      ]);
+    });
+    var body = el('div', { class: 'doc-layout' }, [
+      el('aside', { class: 'doc-rail' }, [docHead, el('div', { class: 'doc-steps' }, stepBtns), totals]),
+      el('div', { class: 'doc-main' }, secs)
+    ]);
+    body.addEventListener('input', updateTotals);
+    body.addEventListener('change', updateTotals);
+    body.addEventListener('click', function () { setTimeout(updateTotals, 0); });
 
     var m = ui.modal({
       title: v.purchase ? 'Editar compra' : 'Registrar compra',
@@ -483,7 +525,13 @@
         el('button', { class: 'btn btn-primary', text: 'Guardar compra', onclick: submit })
       ]
     });
-    syncForma(); syncCotiz(); checkMixto();
+    m.box.classList.add('doc-modal');
+    m.body.addEventListener('scroll', function () {
+      var top = m.body.getBoundingClientRect().top, cur = 0;
+      secs.forEach(function (sec, i) { if (sec.getBoundingClientRect().top - top < 140) cur = i; });
+      stepBtns.forEach(function (b2, i) { b2.classList.toggle('is-active', i === cur); });
+    });
+    syncForma(); syncCotiz(); checkMixto(); updateTotals();
 
     var submitted = false;
     function submit() {
@@ -665,13 +713,24 @@
 
     var comision = comisionBlock(s.comision);
 
-    var preview = el('div', { class: 'sale-preview' });
+    var preview = el('div', { class: 'close-hero' });
+    function eqCell(label, value, cls) {
+      return el('div', { class: 'close-cell ' + (cls || '') }, [el('span', { class: 'close-cell-l', text: label }), el('strong', { class: 'close-cell-v num', text: value })]);
+    }
     function updatePreview() {
+      ui.clear(preview);
+      var top = el('div', { class: 'close-top' }, [
+        el('span', { class: 'close-eyebrow', text: 'Cierre de venta' }),
+        el('span', { class: 'close-veh' }, [el('b', { text: store.vehicleName(v) }), v.patente ? el('span', { class: 'plate plate-sm', text: v.patente }) : null])
+      ]);
+      preview.appendChild(top);
       // Sin precio todavía no hay nada que calcular: mostrar un estado neutro
       // en vez de "-100%" en rojo, que se lee como un error.
       if (store.num(precio.monto.value) <= 0) {
-        ui.clear(preview);
-        preview.appendChild(el('p', { class: 'form-help', text: 'Ingresá el precio de venta para calcular la ganancia.' }));
+        preview.appendChild(el('div', { class: 'close-eq' }, [
+          eqCell('Precio de venta', '—'), el('span', { class: 'close-op', text: '−' }), eqCell('Costo total', '—'), el('span', { class: 'close-op', text: '=' }), eqCell('Ganancia', '—', 'is-result')
+        ]));
+        preview.appendChild(el('p', { class: 'close-empty', text: 'Ingresá el precio de venta para ver cuánto ganás antes de confirmar.' }));
         return;
       }
       var m = App.finance.vehicleMetrics(v);
@@ -683,15 +742,20 @@
       var costo = m.inversionARS + m.comisionCompraARS + precioDuenoARS + (store.num(comision.get() && comision.get().monto) || 0);
       var gan = ventaARS - costo;
       var rent = costo ? gan / costo * 100 : 0;
-      ui.clear(preview);
-      preview.appendChild(el('div', { class: 'sale-preview-row' }, [
-        el('span', { text: esConsignacion ? 'Le corresponde al dueño + gastos + comisión' : 'Lo que pusiste (compra + gastos + comisión)' }), el('strong', { text: App.fmt.money(costo) })
+      preview.appendChild(el('div', { class: 'close-eq' }, [
+        eqCell('Precio de venta', App.fmt.money(ventaARS)),
+        el('span', { class: 'close-op', text: '−' }),
+        eqCell(esConsignacion ? 'Dueño + gastos + comisión' : 'Compra + gastos + comisión', App.fmt.money(costo)),
+        el('span', { class: 'close-op', text: '=' }),
+        el('div', { class: 'close-cell is-result ' + (gan >= 0 ? 'pos' : 'neg') }, [
+          el('span', { class: 'close-cell-l', text: 'Ganancia estimada' }),
+          el('strong', { class: 'close-cell-v num', text: (gan >= 0 ? '+' : '−') + App.fmt.money(Math.abs(gan)) }),
+          el('span', { class: 'close-pct num', text: 'Rentabilidad ' + App.fmt.pct(rent) })
+        ])
       ]));
-      preview.appendChild(el('div', { class: 'sale-preview-row' }, [
-        el('span', { text: 'Ganancia estimada' }),
-        el('strong', { class: gan >= 0 ? 'pos' : 'neg', text: App.fmt.money(gan) + '  (' + App.fmt.pct(rent) + ')' })
-      ]));
+      preview.appendChild(el('div', { class: 'close-foot' }, [el('span', { text: 'Forma de cobro' }), el('strong', { text: store.formaCobroLabel(fForma.value) })]));
     }
+    fForma.addEventListener('change', updatePreview);
     [precio.monto, precio.moneda, fCotiz].forEach(function (i) { i.addEventListener('input', updatePreview); i.addEventListener('change', updatePreview); });
 
     // Cliente y comisión son datos secundarios para registrar la venta:
@@ -709,10 +773,11 @@
       masDatosToggle.textContent = masDatosBox.hidden ? '＋ Más datos' : '－ Menos datos';
     } });
 
-    var body = el('div', { class: 'form-grid' }, [
+    // --- Composición "cierre comercial": formulario a la izquierda y, a la
+    // derecha, el panel de resultado con mucha presencia. ---
+    var main = el('div', { class: 'close-main form-grid' }, [
       el('div', { class: 'grid-2' }, [ui.field('Fecha de venta', fFecha), ui.field('Precio de venta', precio.wrap)]),
       cotizField,
-      preview,
       el('div', { class: 'form-section-title', text: 'Forma de cobro' }),
       ui.field('', fForma),
       mixtoBox,
@@ -722,15 +787,17 @@
       tiBox,
       masDatosToggle, masDatosBox
     ]);
+    var body = el('div', { class: 'close-body' }, [preview, main]);
 
     var m = ui.modal({
       title: v.sale ? 'Editar venta' : 'Registrar venta',
       size: 'lg', body: body,
       footer: [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { m.close(); } }),
-        el('button', { class: 'btn btn-primary', text: 'Guardar venta', onclick: submit })
+        el('button', { class: 'btn btn-primary btn-confirm', text: v.sale ? 'Guardar cambios' : 'Confirmar venta', onclick: submit })
       ]
     });
+    m.box.classList.add('close-modal');
     syncForma(); syncCotiz(); updatePreview(); checkMixto(); updateTiDiferencia();
 
     var submitted = false;

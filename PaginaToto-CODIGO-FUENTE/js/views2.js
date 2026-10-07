@@ -156,6 +156,44 @@
       return n;
     }
   };
+  // Cola priorizada de lo que requiere atención (solo lectura: reutiliza los
+  // mismos cálculos de recordatorios, cuotas, reservas y avisos de vehículos).
+  // La usa Inicio para mostrar un resumen; la pantalla Alertas arma su propia lista.
+  alerts.queue = function () {
+    var hoy = store.todayISO();
+    var b = allBuckets(hoy);
+    var out = [];
+    function rel(date, status, hora) {
+      if (status === 'overdue') return 'Venció ' + fmt.relative(date);
+      if (status === 'today') return 'Hoy' + (hora ? ' · ' + hora : '');
+      return fmt.relative(date).replace(/^./, function (c) { return c.toUpperCase(); });
+    }
+    function describe(it) {
+      if (it.auto) {
+        var e = it;
+        var nm = store.vehicleName(e.vehicle);
+        var title = e.kind === 'pagar' ? 'Pagar cuota ' + e.cuota.numero + ' · ' + nm
+          : e.kind === 'cobrar' ? 'Cobrar cuota ' + e.cuota.numero + ' · ' + nm
+          : 'Vence la reserva · ' + nm;
+        return { title: title, meta: e.monto ? fmt.money(e.monto, e.moneda) : '', href: '#/vehiculo/' + e.vehicle.id, status: e.status, due: rel(e.date, e.status) };
+      }
+      return { title: it.r.titulo, meta: remTipoLabel(it.r.tipo), href: '#/alertas', status: it.status, due: rel(it.date || it.r.fecha, it.status, it.r.hora) };
+    }
+    b.overdue.forEach(function (it) { out.push(describe(it)); });
+    b.today.forEach(function (it) { out.push(describe(it)); });
+    var lim = new Date(); lim.setDate(lim.getDate() + 7);
+    var limIso = lim.getFullYear() + '-' + pad(lim.getMonth() + 1) + '-' + pad(lim.getDate());
+    b.upcoming.forEach(function (it) {
+      var dt = it.date || (it.r && it.r.fecha);
+      if (dt && dt <= limIso) { var d = describe(it); d.status = 'upcoming'; out.push(d); }
+    });
+    alerts.all().forEach(function (a) {
+      if (a.level === 'info') return;
+      out.push({ title: store.vehicleName(a.vehicle) + ' · ' + a.text, meta: '', href: '#/vehiculo/' + a.vehicle.id, status: 'notice', due: 'Aviso' });
+    });
+    return out;
+  };
+
   function daysBetween(a, b) {
     var da = fin.parseDate(a), db = fin.parseDate(b);
     if (!da || !db) return 0;
@@ -163,262 +201,340 @@
   }
   App.alerts = alerts;
 
-  function alertasView(root) {
-    var hoy = store.todayISO();
+  /* ---------- ALERTAS: bandeja de trabajo (cola accionable) ---------- */
+  // Misma lógica de siempre (recordatorios, cuotas, reservas y avisos de
+  // vehículos); acá solo cambia la presentación: una cola priorizada con
+  // contadores, vencimiento muy visible y la acción de resolver en cada fila.
+  var alertFilter = 'todas';
+  var REM_SVG = { tarea: 'list', mantenimiento: 'wrench', tramite: 'file', pago: 'card', turno: 'handshake', gestoria: 'file', stock: 'car', otro: 'bell' };
 
-    var vehAlerts = alerts.all();
-    var b = allBuckets(hoy);
-    var doneRems = store.getReminders().filter(function (r) { return reminderStatus(r, hoy) === 'done'; })
-      .map(function (r) { return { r: r, date: r.fecha, status: 'done' }; });
-    var pendCount = b.overdue.length + b.today.length + b.upcoming.length;
-
-    var wrap = el('div', { class: 'page alertas-page' });
-
-    var head = pageHead('🔔 Alertas');
-    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nueva alerta', onclick: function () { App.forms.reminderForm(null, hoy); } }));
-    wrap.appendChild(head);
-
-    if (b.overdue.length) wrap.appendChild(remGroup('🔴 Vencidas', b.overdue, hoy, 'overdue'));
-    if (b.today.length) wrap.appendChild(remGroup('🟡 Hoy', b.today, hoy, 'today'));
-    if (b.upcoming.length) wrap.appendChild(remGroup('🟢 Próximas', b.upcoming.slice(0, 40), hoy, 'upcoming'));
-    if (!pendCount) {
-      wrap.appendChild(el('div', { class: 'card' }, [ui.emptyState('No tenés nada pendiente. Todo al día 👌', '✅')]));
-    }
-    if (doneRems.length) {
-      wrap.appendChild(el('details', { class: 'card rem-done-box' }, [
-        el('summary', {}, [el('strong', { text: 'Completadas' }), el('span', { class: 'count-tag', text: doneRems.length })]),
-        remList(doneRems, hoy)
-      ]));
-    }
-
-    // Avisos de vehículos (documentación, días en stock, etc.): misma lógica
-    // de siempre, pero colapsados por defecto para no saturar la pantalla.
-    if (vehAlerts.length) {
-      var byVeh = {};
-      vehAlerts.forEach(function (a) { (byVeh[a.vehicle.id] = byVeh[a.vehicle.id] || []).push(a); });
-      var vsec = el('div', { class: 'rem-list' }, Object.keys(byVeh).map(function (vid) {
-        var v = store.getVehicle(vid);
-        return el('a', { class: 'veh-alert', href: '#/vehiculo/' + vid }, [
-          el('div', { class: 'veh-alert-top' }, [
-            el('strong', { text: store.vehicleName(v) }),
-            v.patente ? el('span', { class: 'row-patente', text: v.patente }) : null
-          ]),
-          el('div', { class: 'veh-alert-lines' }, byVeh[vid].map(function (a) {
-            return el('span', { class: 'alrt alrt-' + a.level }, [el('span', { text: a.icon }), el('span', { text: a.text })]);
-          }))
-        ]);
-      }));
-      wrap.appendChild(el('details', { class: 'card rem-done-box' }, [
-        el('summary', {}, [el('strong', { text: 'Avisos de vehículos' }), el('span', { class: 'count-tag', text: vehAlerts.length })]),
-        vsec
-      ]));
-    }
-
-    root.appendChild(wrap);
+  function daysFrom(hoy, iso) { return daysBetween(hoy, iso); }
+  // Tono de la fila: vencido = rojo · próximo (hoy o ≤3 días) = naranja ·
+  // normal = neutro/azul · completado = positivo. El amarillo de marca NO se usa acá.
+  function toneOf(status, date, hoy) {
+    if (status === 'done') return 'done';
+    if (status === 'overdue') return 'overdue';
+    if (status === 'today') return 'soon';
+    return (date && daysFrom(hoy, date) <= 3) ? 'soon' : 'later';
+  }
+  function dueLabel(status, date) {
+    if (status === 'done') return 'Completada';
+    if (status === 'overdue') return 'Venció ' + fmt.relative(date);
+    if (status === 'today') return 'Hoy';
+    var r = fmt.relative(date);
+    return r.charAt(0).toUpperCase() + r.slice(1);
+  }
+  function dueBlock(tone, label, sub) {
+    return el('div', { class: 'w-due w-due-' + tone }, [el('strong', { text: label }), sub ? el('span', { class: 'num', text: sub }) : null]);
   }
 
-  function remGroup(title, items, hoy, kind) {
-    return el('div', { class: 'card rem-group rem-group-' + kind }, [
-      el('div', { class: 'rem-group-head' }, [el('h3', { text: title })]),
-      remList(items, hoy)
+  var MES3 = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  var TILE_LBL = { overdue: 'Vencida', soon: 'Pronto', later: 'Agenda', done: 'Hecha' };
+  // "Ficha de fecha" a la izquierda de cada tarea: es lo primero que se lee.
+  function dateTile(tone, iso, status) {
+    var lbl = status === 'today' ? 'Hoy' : TILE_LBL[tone];
+    return el('div', { class: 'w-tile w-tile-' + tone, 'aria-hidden': 'true' }, [
+      el('small', { text: lbl }),
+      el('b', { class: 'num', text: iso ? String(parseInt(iso.slice(8, 10), 10)) : '–' }),
+      el('small', { text: iso ? MES3[parseInt(iso.slice(5, 7), 10) - 1] : '' })
     ]);
   }
 
-  function remList(items, hoy) {
-    return el('div', { class: 'rem-list' }, items.map(function (it) { return remItem(it, hoy); }));
-  }
-
-  function remItem(it, hoy) {
-    if (it.auto) return autoItem(it, hoy);
+  function workRow(it, hoy) {
+    if (it.auto) return autoWorkRow(it, hoy);
     var r = it.r;
     var status = it.status || reminderStatus(r, hoy);
     var occ = it.date || r.fecha;
     var isDone = occDone(r, occ) || status === 'done';
-    var repTxt = (r.repeat && r.repeat !== 'none') ? ' · ↻ ' + remRepeatLabel(r.repeat) : '';
-    var when;
-    if (status === 'overdue') when = 'Venció · ' + fmt.relative(r.fecha);
-    else if (status === 'today') when = 'Hoy' + (r.hora ? ' · ' + r.hora : '');
-    else if (status === 'done') when = 'Completado';
-    else when = fmt.date(occ) + (r.hora ? ' · ' + r.hora : '');
+    var tone = isDone ? 'done' : toneOf(status, occ, hoy);
+    var repTxt = (r.repeat && r.repeat !== 'none') ? ' · repite ' + remRepeatLabel(r.repeat) : '';
 
-    var check = el('button', {
-      class: 'rem-check' + (isDone ? ' is-done' : ''),
+    var doneBtn = el('button', {
+      class: 'w-act' + (isDone ? ' is-done' : ''), type: 'button',
       title: isDone ? 'Marcar como pendiente' : 'Marcar como hecho',
-      text: isDone ? '✓' : '',
       onclick: function (e) { e.preventDefault(); e.stopPropagation(); store.toggleReminderOccurrence(r.id, occ); }
-    });
+    }, [ui.icon('check'), el('span', { text: isDone ? 'Reabrir' : 'Hecho' })]);
     var del = el('button', {
-      class: 'icon-btn rem-del', title: 'Eliminar', html: '&times;',
+      class: 'icon-btn w-del', type: 'button', title: 'Eliminar', 'aria-label': 'Eliminar alerta', html: '&times;',
       onclick: function (e) {
         e.preventDefault(); e.stopPropagation();
         ui.confirm({ title: 'Eliminar alerta', message: '¿Eliminar "' + r.titulo + '"?', danger: true, confirmText: 'Eliminar' })
           .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Alerta eliminada'); } });
       }
     });
-    return el('div', { class: 'rem-item rem-' + status + (isDone ? ' is-done' : '') }, [
-      check,
-      el('div', { class: 'rem-item-body', onclick: function () { App.forms.reminderForm(r); } }, [
-        el('div', { class: 'rem-item-title' }, [
-          el('span', { class: 'rem-ico', text: remIcon(r.tipo) }),
-          el('span', { class: 'rem-item-name', text: r.titulo })
-        ]),
-        el('div', { class: 'rem-item-meta', text: when + ' · ' + remTipoLabel(r.tipo) + repTxt }),
-        r.nota ? el('div', { class: 'rem-item-note', text: r.nota }) : null
+    return el('div', { class: 'w-row w-' + tone }, [
+      dateTile(tone, occ, isDone ? 'done' : status),
+      el('div', { class: 'w-body', onclick: function () { App.forms.reminderForm(r); } }, [
+        el('div', { class: 'w-title' }, [el('span', { class: 'w-ico' }, ui.icon(REM_SVG[r.tipo] || 'bell')), el('span', { class: 'w-name', text: r.titulo })]),
+        el('div', { class: 'w-dueline w-due-' + tone }, [el('strong', { text: dueLabel(isDone ? 'done' : status, occ) }), el('span', { class: 'num', text: (r.hora ? ' · ' + r.hora : '') + ' · ' + remTipoLabel(r.tipo) + repTxt })]),
+        r.nota ? el('div', { class: 'w-note', text: r.nota }) : null
       ]),
-      del
+      el('div', { class: 'w-actions' }, [doneBtn, del])
     ]);
   }
 
-  function autoItem(e, hoy) {
-    var ico = e.kind === 'pagar' ? '💳' : (e.kind === 'cobrar' ? '💰' : '🔖');
-    var name = e.kind === 'pagar' ? ('Pagar cuota ' + e.cuota.numero + ' — ' + store.vehicleName(e.vehicle))
-      : e.kind === 'cobrar' ? ('Te tienen que pagar la cuota ' + e.cuota.numero + ' — ' + store.vehicleName(e.vehicle))
-      : ('Vence la reserva de ' + store.vehicleName(e.vehicle) + (e.vehicle.reservation.cliente ? ' (' + e.vehicle.reservation.cliente.nombre + ')' : ''));
-    var when = e.status === 'overdue' ? ('Venció · ' + fmt.relative(e.date)) : (e.status === 'today' ? 'Vence hoy' : ('Vence ' + fmt.date(e.date)));
-    var meta = when + (e.monto ? ' · ' + fmt.money(e.monto, e.moneda) : '') +
-      (e.kind === 'cobrar' ? ' · te lo pagan a vos' : (e.kind === 'pagar' ? ' · lo pagás vos' : ''));
+  function autoWorkRow(e, hoy) {
+    var nm = store.vehicleName(e.vehicle);
+    var title = e.kind === 'pagar' ? 'Pagar cuota ' + e.cuota.numero + ' · ' + nm
+      : e.kind === 'cobrar' ? 'Cobrar cuota ' + e.cuota.numero + ' · ' + nm
+      : 'Vence la reserva · ' + nm + (e.vehicle.reservation.cliente ? ' (' + e.vehicle.reservation.cliente.nombre + ')' : '');
+    var meta = (e.monto ? fmt.money(e.monto, e.moneda) + ' · ' : '') +
+      (e.kind === 'cobrar' ? 'te lo pagan a vos' : (e.kind === 'pagar' ? 'lo pagás vos' : 'reserva'));
+    var tone = toneOf(e.status, e.date, hoy);
     var action = null;
-    if (e.kind === 'pagar') action = el('button', { class: 'btn btn-sm btn-primary', text: 'Pagué', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.pagarCuota(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cuota pagada', 'success'); } });
-    else if (e.kind === 'cobrar') action = el('button', { class: 'btn btn-sm btn-primary', text: 'Me pagaron', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.cobrarCuotaVenta(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cobro registrado', 'success'); } });
-    return el('div', { class: 'rem-item rem-' + e.status + ' rem-auto' }, [
-      el('span', { class: 'rem-ico rem-auto-ico', text: ico }),
-      el('a', { class: 'rem-item-body', href: '#/vehiculo/' + e.vehicle.id }, [
-        el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: name })]),
-        el('div', { class: 'rem-item-meta', text: meta })
+    if (e.kind === 'pagar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Pagué', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.pagarCuota(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cuota pagada', 'success'); } });
+    else if (e.kind === 'cobrar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Me pagaron', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.cobrarCuotaVenta(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cobro registrado', 'success'); } });
+    else action = el('a', { class: 'btn btn-sm btn-ghost', href: '#/vehiculo/' + e.vehicle.id, text: 'Ver ficha' });
+    return el('div', { class: 'w-row w-auto w-' + tone }, [
+      dateTile(tone, e.date, e.status),
+      el('a', { class: 'w-body', href: '#/vehiculo/' + e.vehicle.id }, [
+        el('div', { class: 'w-title' }, [el('span', { class: 'w-ico' }, ui.icon(e.kind === 'reserva' ? 'bookmark' : 'card')), el('span', { class: 'w-name', text: title })]),
+        el('div', { class: 'w-dueline w-due-' + tone }, [el('strong', { text: dueLabel(e.status, e.date) }), el('span', { class: 'num', text: ' · ' + meta })])
       ]),
-      action
+      el('div', { class: 'w-actions' }, action)
     ]);
+  }
+
+  function vehAlertRow(vid, list) {
+    var v = store.getVehicle(vid);
+    var worst = list.some(function (a) { return a.level === 'danger'; }) ? 'overdue' : (list.some(function (a) { return a.level === 'warn'; }) ? 'soon' : 'later');
+    return el('a', { class: 'w-row w-notice w-' + worst, href: '#/vehiculo/' + vid }, [
+      el('div', { class: 'w-tile w-tile-' + worst, 'aria-hidden': 'true' }, ui.icon('car')),
+      el('div', { class: 'w-body' }, [
+        el('div', { class: 'w-title' }, [el('span', { class: 'w-name', text: [v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || store.vehicleName(v) }), v.patente ? el('span', { class: 'plate plate-sm', text: v.patente }) : null]),
+        el('ul', { class: 'w-lines' }, list.map(function (a) { return el('li', { class: 'w-line w-line-' + a.level, text: a.text }); }))
+      ]),
+      el('div', { class: 'w-actions' }, el('span', { class: 'w-go' }, ui.icon('chevron')))
+    ]);
+  }
+
+  function alertasView(root) {
+    var hoy = store.todayISO();
+    var vehAlerts = alerts.all();
+    var b = allBuckets(hoy);
+    var doneRems = store.getReminders().filter(function (r) { return reminderStatus(r, hoy) === 'done'; })
+      .map(function (r) { return { r: r, date: r.fecha, status: 'done' }; });
+    var pendCount = b.overdue.length + b.today.length + b.upcoming.length;
+    var byVeh = {};
+    vehAlerts.forEach(function (a) { (byVeh[a.vehicle.id] = byVeh[a.vehicle.id] || []).push(a); });
+    var vehIds = Object.keys(byVeh);
+
+    var wrap = el('div', { class: 'page alertas-page ib' });
+    wrap.appendChild(el('header', { class: 'ib-head' }, [
+      el('div', {}, [
+        el('h1', { text: 'Alertas' }),
+        el('p', { class: 'ib-sub', text: pendCount ? pendCount + (pendCount === 1 ? ' tarea pendiente' : ' tareas pendientes') + (b.overdue.length ? ' · ' + b.overdue.length + ' vencida' + (b.overdue.length === 1 ? '' : 's') : '') : 'Todo al día' })
+      ]),
+      el('button', { class: 'btn btn-primary', type: 'button', onclick: function () { App.forms.reminderForm(null, hoy); } }, [ui.icon('plus'), el('span', { text: 'Nueva alerta' })])
+    ]));
+
+    var FILTERS = [
+      ['todas', 'Bandeja', pendCount, '', 'list'],
+      ['vencidas', 'Vencidas', b.overdue.length, 'overdue', 'alert'],
+      ['hoy', 'Hoy', b.today.length, 'soon', 'clock'],
+      ['proximas', 'Próximas', b.upcoming.length, 'later', 'calendar'],
+      ['completadas', 'Completadas', doneRems.length, 'done', 'check'],
+      ['avisos', 'Avisos de vehículos', vehIds.length, 'notice', 'car']
+    ];
+    var chipBtns = FILTERS.map(function (f) {
+      var btn = el('button', { type: 'button', class: 'ib-folder ib-folder-' + (f[3] || 'all') + (f[2] ? ' has-n' : ''), dataset: { f: f[0] } }, [
+        el('span', { class: 'ib-folder-ico' }, ui.icon(f[4])), el('span', { class: 'ib-folder-l', text: f[1] }), el('span', { class: 'wq-n num', text: f[2] })
+      ]);
+      btn.addEventListener('click', function () { alertFilter = f[0]; draw(); });
+      return btn;
+    });
+    var list = el('div', { class: 'wq-list' });
+    wrap.appendChild(el('div', { class: 'ib-layout' }, [
+      el('nav', { class: 'ib-rail', role: 'tablist', 'aria-label': 'Carpetas de alertas' }, chipBtns),
+      list
+    ]));
+
+    function section(title, tone, items, render) {
+      if (!items.length) return null;
+      return el('section', { class: 'wq-sec wq-sec-' + tone }, [
+        el('div', { class: 'wq-sec-head' }, [el('h3', { text: title }), el('span', { class: 'wq-sec-n num', text: items.length })]),
+        el('div', { class: 'w-list' }, items.map(render))
+      ]);
+    }
+    function draw() {
+      chipBtns.forEach(function (c) {
+        var on = c.dataset.f === alertFilter;
+        c.classList.toggle('is-active', on); c.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      ui.clear(list);
+      var f = alertFilter;
+      var parts = [];
+      var rr = function (it) { return workRow(it, hoy); };
+      if (f === 'todas' || f === 'vencidas') parts.push(section('Vencidas', 'overdue', b.overdue, rr));
+      if (f === 'todas' || f === 'hoy') parts.push(section('Hoy', 'soon', b.today, rr));
+      if (f === 'todas' || f === 'proximas') parts.push(section('Próximas', 'later', f === 'todas' ? b.upcoming.slice(0, 40) : b.upcoming, rr));
+      if (f === 'completadas') parts.push(section('Completadas', 'done', doneRems, rr));
+      if (f === 'avisos' || (f === 'todas' && vehIds.length)) {
+        parts.push(section('Avisos de vehículos', 'notice', vehIds, function (vid) { return vehAlertRow(vid, byVeh[vid]); }));
+      }
+      parts = parts.filter(Boolean);
+      if (!parts.length) {
+        var msg = f === 'todas' ? 'No tenés nada pendiente. Todo al día.' : 'No hay nada en esta carpeta.';
+        list.appendChild(el('div', { class: 'ix-clear' }, [ui.icon('check'), el('div', {}, [el('strong', { text: 'Bandeja vacía' }), el('span', { text: msg })])]));
+        return;
+      }
+      parts.forEach(function (p) { list.appendChild(p); });
+    }
+    draw();
+
+    root.appendChild(wrap);
   }
 
   /* ============================== ECONOMÍA ============================ */
-  // Pantalla principal: menú de módulos en tarjetas (mismo patrón de estado
-  // interno + volverLink ya usado en Resúmenes/Cuotas/Ajustes, sin rutas
-  // nuevas). Cada módulo reutiliza tal cual la vista que ya existía (misma
-  // función, mismos datos, misma lógica) — acá solo se decide en qué
+  // Finanzas de una pyme: navegación lateral propia (Situación, Cuotas,
+  // Gastos, Dólar, Resúmenes) y a la derecha la vista elegida. Cada sección
+  // reutiliza tal cual la vista que ya existía — acá solo se decide en qué
   // contenedor se dibuja.
   var MODULOS_ECONOMIA = [
-    ['situacion', '💰', 'Situación económica', 'Resultado, capital y stock del negocio', finanzasView],
-    ['gastos', '🏢', 'Gastos del negocio', 'Alquiler, sueldos y otros gastos fijos', gastosNegocioView],
-    ['cuotas', '💳', 'Cuotas y cobros', 'Lo que pagás y lo que te pagan', cuotasView],
-    ['dolar', '💵', 'Comparar dólar', 'El valor de tus operaciones en dólares', function (panel) { comparacionView(panel); }],
-    ['resumenes', '📊', 'Resúmenes', 'Totales por período y estadísticas', resumenesView]
+    ['situacion', 'chart', 'Situación', 'Resultado, capital y stock del negocio', finanzasView],
+    ['cuotas', 'card', 'Cuotas y cobros', 'Lo que pagás y lo que te pagan', cuotasView],
+    ['gastos', 'briefcase', 'Gastos del negocio', 'Alquiler, sueldos y otros gastos fijos', gastosNegocioView],
+    ['dolar', 'dollar', 'Comparar dólar', 'El valor de tus operaciones en dólares', function (panel) { comparacionView(panel); }],
+    ['resumenes', 'list', 'Resúmenes', 'Totales por período y estadísticas', resumenesView]
   ];
   var economiaScreen = 'home';
   function economiaView(root) {
-    var wrap = el('div', { class: 'page page-economia' });
-    wrap.appendChild(el('div', { class: 'page-head' }, [
-      el('div', {}, [
-        el('h1', { text: 'Economía' }),
-        el('p', { class: 'page-sub', text: 'Elegí qué querés ver' })
-      ])
+    var wrap = el('div', { class: 'page page-economia fz' });
+    var tabBtns = MODULOS_ECONOMIA.map(function (m) {
+      return el('button', { type: 'button', class: 'fz-nav-i', dataset: { key: m[0] }, onclick: function () { goScreen(m[0]); } }, [
+        el('span', { class: 'fz-nav-ico' }, ui.icon(m[1])), el('span', { class: 'fz-nav-l', text: m[2] })
+      ]);
+    });
+    wrap.appendChild(el('div', { class: 'fz-layout' }, [
+      el('nav', { class: 'fz-nav', role: 'tablist', 'aria-label': 'Secciones de Economía' }, [el('h1', { text: 'Economía' }), el('p', { class: 'fz-nav-sub', text: 'Finanzas del negocio' })].concat(tabBtns)),
+      // class "tab-panel": la regla CSS que le da a Economía su ancho amplio
+      // (.page-economia .tab-panel .page) sigue aplicando igual que antes.
+      el('div', { class: 'tab-panel fz-content' })
     ]));
-
-    // class "tab-panel": la regla CSS que le da a Economía su ancho amplio
-    // (.page-economia .tab-panel .page) sigue aplicando igual que antes.
-    var content = el('div', { class: 'tab-panel' });
-    wrap.appendChild(content);
+    var content = wrap.querySelector('.fz-content');
     root.appendChild(wrap);
 
     function goScreen(key) { economiaScreen = key; render(); }
-    function volverLink() {
-      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Economía', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
-    }
 
     function render() {
       ui.clear(content);
-      var mod = MODULOS_ECONOMIA.filter(function (m) { return m[0] === economiaScreen; })[0];
-      if (mod) {
-        content.appendChild(volverLink());
-        var panel = el('div', { style: 'margin-top:6px' });
-        content.appendChild(panel);
-        mod[4](panel);
-        return;
-      }
-      economiaScreen = 'home';
-      content.appendChild(el('div', { class: 'grid-2 module-grid' }, MODULOS_ECONOMIA.map(function (m) {
-        return el('div', { class: 'card module-card', onclick: function () { goScreen(m[0]); } }, [
-          el('span', { class: 'module-card-ico', text: m[1] }),
-          el('strong', { class: 'module-card-title', text: m[2] }),
-          el('span', { class: 'module-card-desc', text: m[3] })
-        ]);
-      })));
+      if (economiaScreen === 'home') economiaScreen = 'situacion';
+      var mod = MODULOS_ECONOMIA.filter(function (m) { return m[0] === economiaScreen; })[0] || MODULOS_ECONOMIA[0];
+      tabBtns.forEach(function (b) {
+        var on = b.dataset.key === mod[0];
+        b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      var panel = el('div', {});
+      content.appendChild(panel);
+      mod[4](panel);
     }
     render();
   }
 
   /* =============================== FINANZAS =========================== */
-  // ("Situación económica" dentro de Economía). Dashboard financiero: reusa
-  // exactamente fin.globalMetrics()/fin.vehicleMetrics() — ningún cálculo
-  // nuevo, solo se reorganiza cómo se presentan los mismos números.
+  // ("Situación" dentro de Economía). Reusa exactamente
+  // fin.globalMetrics()/fin.vehicleMetrics() — ningún cálculo nuevo, solo se
+  // reorganiza cómo se presentan los mismos números: resultado como
+  // protagonista, estado de resultados, cuentas y stock en tablas alineadas.
+  function signed(n) { return (n >= 0 ? '+' : '−') + fmt.money(Math.abs(n)); }
+  function fzCell(label, value, sub, tone) {
+    return el('div', { class: 'fz-cell' }, [
+      el('span', { class: 'fz-cell-l', text: label }),
+      el('span', { class: 'fz-cell-v num ' + (tone || ''), text: value }),
+      sub ? el('span', { class: 'fz-cell-s', text: sub }) : null
+    ]);
+  }
+  // Barra de una cuenta: lo vigente en azul y lo vencido en rojo, sobre la misma escala.
+  function accountBar(label, total, vencido, max, href) {
+    var wOk = max ? Math.max(0, (total - vencido)) / max * 100 : 0;
+    var wBad = max ? vencido / max * 100 : 0;
+    return el('a', { class: 'fz-acc', href: href || '#' }, [
+      el('div', { class: 'fz-acc-top' }, [el('b', { text: label }), el('span', { class: 'num', text: fmt.money(total) })]),
+      el('div', { class: 'fz-bar', 'aria-hidden': 'true' }, [el('i', { class: 'ok', style: 'width:' + wOk + '%' }), el('i', { class: 'bad', style: 'width:' + wBad + '%' })]),
+      el('div', { class: 'fz-acc-sub ' + (vencido ? 'neg' : ''), text: vencido ? 'Vencido ' + fmt.money(vencido) : 'Sin vencidos' })
+    ]);
+  }
+
   function finanzasView(root) {
     var g = fin.globalMetrics();
-    var wrap = el('div', { class: 'page econ-dashboard' });
-    wrap.appendChild(pageHead('Situación económica', 'Cómo está el negocio, de un vistazo'));
+    var wrap = el('div', { class: 'page econ-dashboard fz-situ' });
 
-    // --- Lo más importante: resultado del negocio ---
-    // Es un acumulado histórico (todas las ventas − todos los gastos fijos
-    // cargados, sin recorte de fecha) — mismo cálculo de siempre, solo se
-    // aclara el período en el título para que no se lea como "de hoy".
-    wrap.appendChild(el('div', { class: 'econ-hero' }, [
-      el('span', { class: 'econ-hero-label', text: 'Resultado histórico del negocio' }),
-      el('span', { class: 'econ-hero-value ' + (g.resultadoNegocio >= 0 ? 'pos' : 'neg'), text: (g.resultadoNegocio >= 0 ? '+' : '') + fmt.money(g.resultadoNegocio) }),
-      el('span', { class: 'econ-hero-sub', text: 'Ganancia acumulada por autos vendidos − gastos fijos acumulados. Para un período puntual, mirá Resúmenes.' })
-    ]));
-
-    // --- Tres métricas principales, más discretas que el resultado ---
-    wrap.appendChild(el('div', { class: 'grid-3' }, [
-      miniStat('Capital en stock', fmt.money(g.capitalInvertido)),
-      miniStat('Valor del stock', fmt.money(g.valorEstimadoStock)),
-      miniStat('Ganancia obtenida', fmt.money(g.gananciaTotal), g.gananciaTotal >= 0 ? 'pos' : 'neg')
-    ]));
-
-    // --- Stock: qué vehículos tiene y cuánto valen ---
-    var enStock = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
-      .sort(function (a, b) { return b.createdAt - a.createdAt; });
-    var stockCard = el('div', { class: 'card' }, [
-      el('div', { class: 'card-head' }, [
-        el('h3', { text: '🚗 Stock' }),
-        el('span', { class: 'count-tag', text: g.autosEnStock + ' de ' + g.totalVehiculos })
+    // --- Resultado histórico: el número que importa, con su ecuación ---
+    var potencial = g.valorEstimadoStock - g.capitalInvertido;
+    wrap.appendChild(el('section', { class: 'fz-hero' }, [
+      el('div', { class: 'fz-hero-main' }, [
+        el('span', { class: 'fz-eyebrow', text: 'Resultado histórico del negocio' }),
+        el('span', { class: 'fz-hero-v num ' + (g.resultadoNegocio >= 0 ? 'pos' : 'neg'), text: signed(g.resultadoNegocio) }),
+        el('span', { class: 'fz-hero-s', text: 'Acumulado de todas las ventas menos los gastos del negocio. Para un período puntual, mirá Resúmenes.' })
       ]),
-      el('p', { class: 'form-help', text: g.autosEnStock + ' vehículo' + (g.autosEnStock === 1 ? '' : 's') + ' en stock · ' + fmt.money(g.capitalInvertido) + ' invertidos' })
-    ]);
-    if (!enStock.length) {
-      stockCard.appendChild(ui.emptyState('No hay vehículos en stock.', '🚗'));
-    } else {
-      // Tarjetas en vez de tabla: mismo dato, sin scroll horizontal en mobile.
-      stockCard.appendChild(el('div', { class: 'rem-list' }, enStock.map(function (v) {
-        var m = fin.vehicleMetrics(v);
-        var dif = m.estimadoARS - m.costoTotalARS;
-        return el('div', { class: 'rem-item rem-auto' }, [
-          el('span', { class: 'rem-ico rem-auto-ico', text: '🚗' }),
-          el('a', { class: 'rem-item-body', href: '#/vehiculo/' + v.id }, [
-            el('div', { class: 'rem-item-title' }, [
-              el('span', { class: 'rem-item-name', text: store.vehicleName(v) }),
-              (v.origin && v.origin.type === 'consignacion') ? ui.pill('🤝 Consig.', 'pill-warn') : null
-            ]),
-            el('div', { class: 'rem-item-meta' }, [
-              el('span', { text: 'Inversión ' + fmt.money(m.costoTotalARS) + ' · Valor estimado ' + fmt.money(m.estimadoARS) }),
-              el('span', { class: dif >= 0 ? 'pos' : 'neg', text: '  ' + (dif >= 0 ? '+' : '') + fmt.money(dif) })
-            ])
-          ])
-        ]);
-      })));
-    }
-    wrap.appendChild(stockCard);
-
-    // --- Pendientes: cuotas por cobrar/pagar, gastos fijos y diferencia en USD ---
-    // ("Rendimiento" se sacó de esta pantalla — los mismos datos
-    // (g.mayorGanancia, g.vendidoMasRapido, g.masTiempoStock, g.mayorVenta)
-    // se siguen usando tal cual en Resúmenes → Estadísticas del negocio.)
-    wrap.appendChild(el('div', { class: 'card' }, [
-      el('h3', { text: '💰 Pendientes' }),
-      el('div', { class: 'grid-2' }, [
-        miniStat('Por cobrar', fmt.money(g.porCobrar), g.porCobrarVencido ? 'neg' : ''),
-        miniStat('Por pagar', fmt.money(g.porPagarCuotas), g.porPagarVencido ? 'neg' : ''),
-        miniStat('Gastos del negocio', fmt.money(g.gastosFijosTotales)),
-        miniStat('Diferencia en USD', fmt.usd(g.gananciaTotalUSD), g.gananciaTotalUSD >= 0 ? 'pos' : 'neg')
+      el('div', { class: 'fz-eq' }, [
+        fzCell('Ganancia por ventas', signed(g.gananciaTotal), g.autosVendidos + (g.autosVendidos === 1 ? ' vehículo vendido' : ' vehículos vendidos'), g.gananciaTotal >= 0 ? 'pos' : 'neg'),
+        el('span', { class: 'fz-op', 'aria-hidden': 'true', text: '−' }),
+        fzCell('Gastos del negocio', fmt.money(g.gastosFijosTotales), 'Fijos acumulados'),
+        el('span', { class: 'fz-op', 'aria-hidden': 'true', text: '=' }),
+        fzCell('En dólares', (g.gananciaTotalUSD >= 0 ? '+' : '−') + fmt.usd(Math.abs(g.gananciaTotalUSD)), 'Ganancia de ventas')
       ])
     ]));
+
+    // --- Capital en stock ---
+    wrap.appendChild(el('section', { class: 'fz-strip' }, [
+      fzCell('Capital en stock', fmt.money(g.capitalInvertido), g.autosEnStock + (g.autosEnStock === 1 ? ' vehículo' : ' vehículos')),
+      fzCell('Valor estimado del stock', fmt.money(g.valorEstimadoStock), 'Según precio pretendido'),
+      fzCell('Margen potencial', signed(potencial), 'Valor estimado − capital', potencial > 0 ? 'pos' : (potencial < 0 ? 'neg' : ''))
+    ]));
+
+    // --- Cuentas pendientes: dónde está la plata ---
+    var max = Math.max(g.porCobrar, g.porPagarCuotas, 1);
+    var neto = g.porCobrar - g.porPagarCuotas;
+    wrap.appendChild(el('section', { class: 'fz-block' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Cuentas pendientes' }),
+        el('a', { class: 'ctl-link', href: '#', onclick: function (e) { e.preventDefault(); economiaScreen = 'cuotas'; App.router.render(); } }, ['Cuotas y cobros', ui.icon('chevron')])
+      ]),
+      el('div', { class: 'fz-accs' }, [
+        accountBar('Por cobrar', g.porCobrar, g.porCobrarVencido, max, '#/cuotas'),
+        accountBar('Por pagar', g.porPagarCuotas, g.porPagarVencido, max, '#/cuotas'),
+        el('div', { class: 'fz-net' }, [el('span', { text: 'Posición neta' }), el('b', { class: 'num ' + (neto > 0 ? 'pos' : (neto < 0 ? 'neg' : '')), text: signed(neto) })])
+      ])
+    ]));
+
+    // --- Stock: inversión vs. valor estimado (tabla financiera) ---
+    var enStock = store.activeVehicles().filter(function (v) { return v.estado !== 'vendido'; })
+      .sort(function (a, b) { return b.createdAt - a.createdAt; });
+    var stockCard = el('section', { class: 'fz-block' }, [
+      el('div', { class: 'ix-block-head' }, [
+        el('h2', { text: 'Stock: inversión y valor estimado' }),
+        el('span', { class: 'fz-note', text: g.autosEnStock + ' de ' + g.totalVehiculos + ' vehículos' })
+      ])
+    ]);
+    if (!enStock.length) {
+      stockCard.appendChild(ui.emptyState('No hay vehículos en stock.', 'car'));
+    } else {
+      var rows = enStock.map(function (v) {
+        var m = fin.vehicleMetrics(v);
+        var dif = m.estimadoARS - m.costoTotalARS;
+        return el('tr', { class: 'clickable-row', onclick: function () { location.hash = '#/vehiculo/' + v.id; } }, [
+          el('td', {}, [el('a', { class: 'fin-veh', href: '#/vehiculo/' + v.id }, [
+            v.patente ? el('span', { class: 'plate plate-sm', text: v.patente }) : null,
+            el('span', { class: 'fin-veh-name', text: [v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || store.vehicleName(v) })
+          ])]),
+          el('td', { class: 'num', text: fmt.money(m.costoTotalARS) }),
+          el('td', { class: 'num c-valor', text: fmt.money(m.estimadoARS) }),
+          el('td', { class: 'num ' + (dif > 0 ? 'pos' : (dif < 0 ? 'neg' : 'muted')), text: signed(dif) })
+        ]);
+      });
+      stockCard.appendChild(el('div', { class: 'fin-scroll' }, el('table', { class: 'fin-table fin-stock' }, [
+        el('thead', {}, el('tr', {}, [el('th', { text: 'Vehículo' }), el('th', { class: 'num', text: 'Inversión' }), el('th', { class: 'num c-valor', text: 'Valor estimado' }), el('th', { class: 'num', text: 'Diferencia' })])),
+        el('tbody', {}, rows),
+        el('tfoot', {}, el('tr', {}, [
+          el('td', { text: 'Total' }),
+          el('td', { class: 'num', text: fmt.money(g.capitalInvertido) }),
+          el('td', { class: 'num c-valor', text: fmt.money(g.valorEstimadoStock) }),
+          el('td', { class: 'num ' + (potencial > 0 ? 'pos' : (potencial < 0 ? 'neg' : '')), text: signed(potencial) })
+        ]))
+      ])));
+    }
+    wrap.appendChild(stockCard);
 
     root.appendChild(wrap);
   }
@@ -712,24 +828,86 @@
     });
   }
 
+  // Historial: registro de auditoría. Qué pasó, cuándo (día y hora) y sobre
+  // qué vehículo, agrupado por día. Neutro y compacto; cada fila abre el mismo
+  // detalle de siempre. (El registro actual no guarda qué usuario hizo cada
+  // cambio, por eso no se muestra "quién".)
+  var AU_TIPOS = [['', 'Todos'], ['compra', 'Compras'], ['venta', 'Ventas'], ['gasto', 'Gastos'], ['cuota', 'Cuotas'], ['estado', 'Cambios de estado'], ['parte-pago', 'Parte de pago'], ['edicion', 'Ediciones']];
+  var AU_LABEL = { compra: 'Compra', venta: 'Venta', gasto: 'Gasto', cuota: 'Cuota', estado: 'Estado', edicion: 'Edición', 'parte-pago': 'Parte de pago', papelera: 'Papelera', restaurar: 'Restauración', otro: 'Registro', 'gasto-fijo': 'Gasto del negocio' };
+  var AU_ICON = { compra: 'receipt', venta: 'tag', gasto: 'wrench', cuota: 'card', estado: 'swap', edicion: 'file', 'parte-pago': 'car', papelera: 'trash', restaurar: 'swap', otro: 'activity', 'gasto-fijo': 'briefcase' };
+  var auFiltro = { tipo: '', q: '' };
+  function auDay(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function auDayLabel(iso) {
+    var r = fmt.relative(iso);
+    var d = fin.parseDate(iso);
+    var long = d ? d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }) : iso;
+    long = long.charAt(0).toUpperCase() + long.slice(1);
+    return (r === 'hoy' ? 'Hoy' : (r === 'ayer' ? 'Ayer' : null)) ? ((r === 'hoy' ? 'Hoy' : 'Ayer') + ' · ' + long) : long;
+  }
   function historialView(root) {
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Historial general', 'Todos los movimientos en orden cronológico'));
+    var wrap = el('div', { class: 'page au' });
     var evts = store.getHistory();
-    var tipos = [['', 'Todos'], ['compra', 'Compras'], ['venta', 'Ventas'], ['gasto', 'Gastos'], ['cuota', 'Cuotas'], ['estado', 'Cambios de estado'], ['parte-pago', 'Parte de pago'], ['edicion', 'Ediciones']];
-    var filter = { tipo: '' };
-    var seg = el('div', { class: 'seg-control wrap' }, tipos.map(function (t) {
-      return el('button', { class: 'seg' + (t[0] === filter.tipo ? ' is-active' : ''), text: t[1], onclick: function () { filter.tipo = t[0]; draw(); } });
-    }));
-    wrap.appendChild(seg);
-    var box = el('div', {});
+    var count = el('p', { class: 'au-sub' });
+    wrap.appendChild(el('header', { class: 'au-head' }, [el('div', {}, [el('h1', { text: 'Historial' }), count])]));
+
+    var q = ui.input({ value: auFiltro.q, placeholder: 'Buscar por detalle, vehículo o patente', class: 'input' });
+    wrap.appendChild(el('label', { class: 'dms-search au-search' }, [ui.icon('search'), q]));
+    var tabs = AU_TIPOS.map(function (t) {
+      var b = el('button', { type: 'button', class: 'dms-view', dataset: { t: t[0] }, text: t[1] });
+      b.addEventListener('click', function () { auFiltro.tipo = t[0]; draw(); });
+      return b;
+    });
+    wrap.appendChild(el('div', { class: 'dms-views au-tabs', role: 'tablist' }, tabs));
+    q.addEventListener('input', function () { auFiltro.q = q.value; draw(); });
+    var box = el('div', { class: 'au-log' });
     wrap.appendChild(box);
+
+    function vehOf(e) { return e.vehicleId ? store.getVehicle(e.vehicleId) : null; }
     function draw() {
-      ui.qsa('.seg', seg).forEach(function (b, i) { b.classList.toggle('is-active', tipos[i][0] === filter.tipo); });
-      var list = evts.filter(function (e) { return !filter.tipo || e.tipo === filter.tipo || (filter.tipo === 'estado' && e.tipo === 'estado'); });
+      tabs.forEach(function (b) { var on = b.dataset.t === auFiltro.tipo; b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+      var term = auFiltro.q.trim().toLowerCase();
+      var list = evts.filter(function (e) {
+        if (auFiltro.tipo && e.tipo !== auFiltro.tipo) return false;
+        if (term) {
+          var v = vehOf(e);
+          var hay = [e.titulo, e.detalle, v ? store.vehicleName(v) : '', v ? v.patente : ''].join(' ').toLowerCase();
+          if (hay.indexOf(term) < 0) return false;
+        }
+        return true;
+      });
+      count.textContent = list.length + (list.length === 1 ? ' movimiento' : ' movimientos') + (list.length !== evts.length ? ' de ' + evts.length : '') + ' · del más reciente al más antiguo';
       ui.clear(box);
-      if (!list.length) { box.appendChild(ui.emptyState('Sin movimientos.', '🕓')); return; }
-      box.appendChild(timeline(list));
+      if (!list.length) { box.appendChild(ui.emptyState('Sin movimientos.', 'activity')); return; }
+      var lastDay = null, sec = null, n = 0;
+      list.forEach(function (e) {
+        var day = auDay(e.ts);
+        if (day !== lastDay) {
+          sec = el('section', { class: 'au-day' }, [el('h3', { class: 'au-day-h', text: auDayLabel(day) })]);
+          box.appendChild(sec); lastDay = day;
+        }
+        var d = new Date(e.ts);
+        var v = vehOf(e);
+        var fechaOp = e.fecha && e.fecha !== day ? 'Fecha de la operación ' + fmt.date(e.fecha) : '';
+        sec.appendChild(el('div', { class: 'au-row', tabindex: '0', onclick: function () { eventDetail(e); }, onkeydown: function (ev) { if (ev.key === 'Enter') eventDetail(e); } }, [
+          el('span', { class: 'au-time num', text: pad(d.getHours()) + ':' + pad(d.getMinutes()) }),
+          el('span', { class: 'au-ico', title: AU_LABEL[e.tipo] || 'Registro' }, ui.icon(AU_ICON[e.tipo] || 'activity')),
+          el('span', { class: 'au-what' }, [
+            el('b', { class: 'au-title', text: e.titulo }),
+            el('span', { class: 'au-meta', text: [AU_LABEL[e.tipo] || 'Registro', e.detalle, fechaOp].filter(Boolean).join(' · ') })
+          ]),
+          el('span', { class: 'au-on' }, v ? [
+            el('a', { class: 'au-veh', href: '#/vehiculo/' + v.id, onclick: function (ev) { ev.stopPropagation(); } }, [
+              v.patente ? el('span', { class: 'plate plate-sm', text: v.patente }) : null,
+              el('span', { text: [v.marca, v.modelo].filter(Boolean).join(' ') || store.vehicleName(v) })
+            ])
+          ] : null),
+          el('span', { class: 'au-amt num', text: e.monto != null ? fmt.money(e.monto, e.moneda) : '' })
+        ]));
+        n++;
+      });
     }
     draw();
     root.appendChild(wrap);
@@ -955,68 +1133,129 @@
 
   /* ========================= CLIENTES Y PROVEEDORES ================= */
   function contactosView(root) {
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Clientes y proveedores', 'Historial de personas con las que operaste'));
-
-    var clientes = {}, proveedores = {};
+    // Agenda profesional: lista de personas a la izquierda (buscable) y, a la
+    // derecha, la ficha simple de la persona elegida con su teléfono y las
+    // operaciones en las que participó. Mismos datos de siempre: clientes
+    // salen de las ventas y proveedores de las compras.
+    var people = [];
+    var idx = { cliente: {}, proveedor: {} };
+    function add(tipo, p, op) {
+      var k = p.nombre.toLowerCase();
+      var e = idx[tipo][k];
+      if (!e) { e = idx[tipo][k] = { tipo: tipo, key: tipo + ':' + k, nombre: p.nombre, telefono: p.telefono, ops: [] }; people.push(e); }
+      e.ops.push(op);
+    }
     store.activeVehicles().forEach(function (v) {
       if (v.sale && v.sale.cliente && v.sale.cliente.nombre) {
-        var k = v.sale.cliente.nombre.toLowerCase();
-        (clientes[k] = clientes[k] || { nombre: v.sale.cliente.nombre, telefono: v.sale.cliente.telefono, ops: [] }).ops.push({ v: v, fecha: v.sale.fecha, monto: fin.vehicleMetrics(v).ventaARS, tipo: 'Compró' });
+        add('cliente', v.sale.cliente, { v: v, fecha: v.sale.fecha, monto: fin.vehicleMetrics(v).ventaARS, tipo: 'Compró' });
       }
       if (v.purchase && v.purchase.proveedor && v.purchase.proveedor.nombre) {
-        var k2 = v.purchase.proveedor.nombre.toLowerCase();
-        (proveedores[k2] = proveedores[k2] || { nombre: v.purchase.proveedor.nombre, telefono: v.purchase.proveedor.telefono, ops: [] }).ops.push({ v: v, fecha: v.purchase.fecha, monto: fin.vehicleMetrics(v).compraARS, tipo: 'Vendió' });
+        add('proveedor', v.purchase.proveedor, { v: v, fecha: v.purchase.fecha, monto: fin.vehicleMetrics(v).compraARS, tipo: 'Vendió' });
       }
     });
+    people.forEach(function (p) { p.total = p.ops.reduce(function (s, o) { return s + o.monto; }, 0); });
+    people.sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+
+    var wrap = el('div', { class: 'page ag' });
+    wrap.appendChild(el('header', { class: 'ag-head' }, [
+      el('h1', { text: 'Clientes y proveedores' }),
+      el('p', { class: 'ag-sub', text: people.length ? people.length + (people.length === 1 ? ' persona' : ' personas') + ' con las que operaste' : 'Las personas con las que operaste' })
+    ]));
+
+    if (!people.length) {
+      wrap.appendChild(el('div', { class: 'ix-clear' }, [ui.icon('users'), el('div', {}, [el('strong', { text: 'Todavía no hay contactos' }), el('span', { text: 'Se arman solos con el cliente de cada venta y el vendedor de cada compra.' })])]));
+      root.appendChild(wrap); return;
+    }
 
     // Teléfono tocable: llamar siempre que haya número; WhatsApp además
     // cuando parece un celular argentino (10 dígitos, área sin 0/15 — el
     // mismo formato en el que ya se cargan los teléfonos en la app).
-    function phoneActions(telefono) {
+    function phoneButtons(telefono) {
       if (!telefono) return null;
       var digits = telefono.replace(/\D/g, '');
       if (!digits) return null;
-      var kids = [el('a', { class: 'icon-btn phone-action', href: 'tel:' + digits, title: 'Llamar', onclick: function (e) { e.stopPropagation(); }, html: '📞' })];
-      if (digits.length === 10) {
-        kids.push(el('a', { class: 'icon-btn phone-action', href: 'https://wa.me/549' + digits, target: '_blank', rel: 'noopener', title: 'WhatsApp', onclick: function (e) { e.stopPropagation(); }, html: '💬' }));
-      }
-      return el('span', { class: 'phone-actions' }, kids);
+      var kids = [el('a', { class: 'btn btn-sm btn-ghost', href: 'tel:' + digits, title: 'Llamar' }, [ui.icon('phone'), el('span', { text: 'Llamar' })])];
+      if (digits.length === 10) kids.push(el('a', { class: 'btn btn-sm btn-ghost', href: 'https://wa.me/549' + digits, target: '_blank', rel: 'noopener', title: 'WhatsApp' }, [ui.icon('message'), el('span', { text: 'WhatsApp' })]));
+      return el('div', { class: 'ag-phone-btns' }, kids);
     }
+    function initials(n) {
+      var w = n.trim().split(/\s+/).filter(Boolean);
+      return ((w[0] || '?').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase();
+    }
+    var TIPO_L = { cliente: 'Cliente', proveedor: 'Proveedor' };
 
-    function group(title, obj, emptyMsg) {
-      var keys = Object.keys(obj);
-      var card = el('div', { class: 'card' });
-      card.appendChild(el('h3', { text: title }));
-      if (!keys.length) { card.appendChild(ui.emptyState(emptyMsg, '👤')); return card; }
-      keys.forEach(function (k) {
-        var c = obj[k];
-        var total = c.ops.reduce(function (s, o) { return s + o.monto; }, 0);
-        card.appendChild(el('details', { class: 'contact-item' }, [
-          el('summary', {}, [
-            el('div', { class: 'contact-id' }, [
-              el('strong', { text: c.nombre }),
-              c.telefono ? el('span', { class: 'muted', text: ' · ' + c.telefono }) : null,
-              phoneActions(c.telefono)
-            ]),
-            el('div', { class: 'contact-meta' }, [
-              el('span', { class: 'count-tag', text: c.ops.length + ' op.' }),
-              el('span', { class: 'muted', text: fmt.money(total) })
-            ])
-          ]),
-          el('div', { class: 'contact-ops' }, c.ops.map(function (o) {
-            return el('a', { class: 'contact-op', href: '#/vehiculo/' + o.v.id }, [
-              el('span', { text: o.tipo + ' ' + store.vehicleName(o.v) }),
-              el('span', { class: 'muted', text: fmt.date(o.fecha) + ' · ' + fmt.money(o.monto) })
-            ]);
-          }))
+    var state = { q: '', tipo: 'todos', sel: null };
+    var desktop = window.matchMedia && window.matchMedia('(min-width: 901px)').matches;
+
+    var q = ui.input({ placeholder: 'Buscar por nombre o teléfono', class: 'input' });
+    var seg = el('div', { class: 'ag-seg', role: 'tablist' }, [['todos', 'Todos'], ['cliente', 'Clientes'], ['proveedor', 'Proveedores']].map(function (t) {
+      var b = el('button', { type: 'button', class: 'ag-seg-b', dataset: { t: t[0] }, text: t[1] });
+      b.addEventListener('click', function () { state.tipo = t[0]; drawList(); });
+      return b;
+    }));
+    var listBox = el('div', { class: 'ag-items' });
+    var detail = el('section', { class: 'ag-detail' });
+    var layout = el('div', { class: 'ag-layout' }, [
+      el('div', { class: 'ag-list' }, [el('label', { class: 'dms-search' }, [ui.icon('search'), q]), seg, listBox]),
+      detail
+    ]);
+    wrap.appendChild(layout);
+    q.addEventListener('input', function () { state.q = q.value; drawList(); });
+
+    function filtered() {
+      var term = state.q.trim().toLowerCase();
+      var digits = term.replace(/\D/g, '');
+      return people.filter(function (p) {
+        if (state.tipo !== 'todos' && p.tipo !== state.tipo) return false;
+        if (!term) return true;
+        return p.nombre.toLowerCase().indexOf(term) >= 0 || (digits && (p.telefono || '').replace(/\D/g, '').indexOf(digits) >= 0);
+      });
+    }
+    function drawList() {
+      Array.prototype.forEach.call(seg.children, function (b) { var on = b.dataset.t === state.tipo; b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+      ui.clear(listBox);
+      var items = filtered();
+      if (!items.length) { listBox.appendChild(el('p', { class: 'ag-none', text: 'No hay personas que coincidan.' })); return; }
+      var lastL = null;
+      items.forEach(function (p) {
+        var L = p.nombre.charAt(0).toUpperCase();
+        if (L !== lastL) { listBox.appendChild(el('div', { class: 'ag-letter', text: L })); lastL = L; }
+        listBox.appendChild(el('button', { type: 'button', class: 'ag-item' + (state.sel === p.key ? ' is-active' : ''), onclick: function () { state.sel = p.key; layout.classList.add('ag-has-sel'); drawList(); drawDetail(); } }, [
+          el('span', { class: 'ag-av ag-av-' + p.tipo, text: initials(p.nombre) }),
+          el('span', { class: 'ag-item-t' }, [el('b', { text: p.nombre }), el('small', { text: (p.telefono || 'Sin teléfono') + ' · ' + p.ops.length + (p.ops.length === 1 ? ' operación' : ' operaciones') })]),
+          el('span', { class: 'ag-tag ag-tag-' + p.tipo, text: TIPO_L[p.tipo] })
         ]));
       });
-      return card;
     }
-
-    wrap.appendChild(group('Clientes', clientes, 'Todavía no registraste clientes en las ventas.'));
-    wrap.appendChild(group('Proveedores / vendedores', proveedores, 'Todavía no registraste proveedores en las compras.'));
+    function drawDetail() {
+      ui.clear(detail);
+      var p = people.filter(function (x) { return x.key === state.sel; })[0];
+      if (!p) { detail.appendChild(el('div', { class: 'ag-empty' }, [ui.icon('users'), el('p', { text: 'Elegí una persona para ver sus datos y operaciones.' })])); return; }
+      detail.appendChild(el('button', { type: 'button', class: 'ag-back', onclick: function () { layout.classList.remove('ag-has-sel'); } }, [ui.icon('back'), el('span', { text: 'Contactos' })]));
+      detail.appendChild(el('div', { class: 'ag-card-head' }, [
+        el('span', { class: 'ag-av ag-av-lg ag-av-' + p.tipo, text: initials(p.nombre) }),
+        el('div', { class: 'ag-card-id' }, [
+          el('h2', { text: p.nombre }),
+          el('div', { class: 'ag-card-meta' }, [el('span', { class: 'ag-tag ag-tag-' + p.tipo, text: TIPO_L[p.tipo] }), el('span', { class: 'num', text: p.telefono || 'Sin teléfono cargado' })])
+        ])
+      ]));
+      var pb = phoneButtons(p.telefono); if (pb) detail.appendChild(pb);
+      detail.appendChild(el('div', { class: 'ag-summary' }, [
+        el('div', {}, [el('small', { text: 'Operaciones' }), el('b', { class: 'num', text: p.ops.length })]),
+        el('div', {}, [el('small', { text: p.tipo === 'cliente' ? 'Total comprado' : 'Total vendido a vos' }), el('b', { class: 'num', text: fmt.money(p.total) })])
+      ]));
+      detail.appendChild(el('h3', { class: 'ag-h3', text: 'Operaciones' }));
+      detail.appendChild(el('div', { class: 'ag-ops' }, p.ops.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).map(function (o) {
+        return el('a', { class: 'ag-op', href: '#/vehiculo/' + o.v.id }, [
+          el('span', { class: 'ag-op-t' }, [el('b', { text: o.tipo + ' ' + ([o.v.marca, o.v.modelo, o.v.anio].filter(Boolean).join(' ') || store.vehicleName(o.v)) }), o.v.patente ? el('span', { class: 'plate plate-sm', text: o.v.patente }) : null]),
+          el('span', { class: 'ag-op-d num', text: fmt.date(o.fecha) }),
+          el('span', { class: 'ag-op-m num', text: fmt.money(o.monto) }),
+          ui.icon('chevron', 'ag-op-go')
+        ]);
+      })));
+    }
+    if (desktop) { state.sel = people[0].key; layout.classList.add('ag-has-sel'); }
+    drawList(); drawDetail();
     root.appendChild(wrap);
   }
 
@@ -1062,18 +1301,16 @@
   // Reutiliza tal cual totals()/block() de siempre — ningún dato ni cálculo
   // nuevo, solo se decide cuál de los dos bloques se dibuja.
   var cuotasSubTab = 'pagar';
+  /* ===================== CUOTAS Y COBROS (cobranza) ==================== */
+  // Seguimiento de cobranza: a quién cobrar / a quién pagar, cuánto y cuándo.
+  // Mismos datos (fin.allInstallments) y mismas acciones ("Pagué" / "Me
+  // pagaron") — solo cambia la presentación: lista agrupada por urgencia.
   function cuotasView(root) {
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Cuotas y cobros', 'Lo que tenés que pagar y lo que te tienen que pagar'));
+    var wrap = el('div', { class: 'page cb' });
     var hoy = store.todayISO();
     var inst = fin.allInstallments();
-
-    var seg = el('div', { class: 'seg-control' }, [
-      el('button', { class: 'seg' + (cuotasSubTab === 'pagar' ? ' is-active' : ''), text: 'Cuotas', onclick: function () { cuotasSubTab = 'pagar'; draw(); } }),
-      el('button', { class: 'seg' + (cuotasSubTab === 'cobrar' ? ' is-active' : ''), text: 'Cobros', onclick: function () { cuotasSubTab = 'cobrar'; draw(); } })
-    ]);
-    wrap.appendChild(seg);
-    var content = el('div', {});
+    var lim = new Date(); lim.setDate(lim.getDate() + (store.getState().settings.cuotaProximaDias || 7));
+    var limIso = lim.getFullYear() + '-' + pad(lim.getMonth() + 1) + '-' + pad(lim.getDate());
 
     function totals(list) {
       var t = { total: 0, hecho: 0, falta: 0, vencido: 0 };
@@ -1084,88 +1321,191 @@
       });
       return t;
     }
-    function block(titulo, list, tipo) {
-      var t = totals(list);
-      var card = el('div', { class: 'card' });
-      card.appendChild(el('h3', { text: titulo }));
-      if (!list.length) { card.appendChild(ui.emptyState(tipo === 'pagar' ? 'No tenés compras en cuotas.' : 'No tenés ventas financiadas.', '💳')); return card; }
-      card.appendChild(el('div', { class: 'cuotas-summary' }, [
-        el('div', {}, [el('span', { text: 'Total' }), el('strong', { text: fmt.money(t.total) })]),
-        el('div', {}, [el('span', { text: tipo === 'pagar' ? 'Pagado' : 'Cobrado' }), el('strong', { class: 'pos', text: fmt.money(t.hecho) })]),
-        el('div', {}, [el('span', { text: 'Falta' }), el('strong', { class: t.falta ? 'neg' : '', text: fmt.money(t.falta) })]),
-        t.vencido ? el('div', {}, [el('span', { text: 'Vencido' }), el('strong', { class: 'neg', text: fmt.money(t.vencido) })]) : null
-      ]));
-      // Tarjetas (mismo componente que ya usa Alertas para cuotas próximas:
-      // .rem-item.rem-auto) en vez de una tabla — así la acción principal
-      // ("Pagué"/"Me pagaron") siempre queda visible, sin scroll horizontal.
-      var ico = tipo === 'pagar' ? '💳' : '💰';
-      card.appendChild(el('div', { class: 'rem-list' }, list.map(function (it) {
-        var c = it.cuota;
-        var done = it.estado === 'pagada' || it.estado === 'cobrada';
-        var pillCls = done ? 'pill-ok' : (it.estado === 'vencida' ? 'pill-danger' : 'pill-warn');
-        var pillTxt = it.estado.charAt(0).toUpperCase() + it.estado.slice(1);
-        return el('div', { class: 'rem-item rem-auto' + (it.estado === 'vencida' ? ' rem-overdue' : '') + (done ? ' is-done' : '') }, [
-          el('span', { class: 'rem-ico rem-auto-ico', text: ico }),
-          el('a', { class: 'rem-item-body', href: '#/vehiculo/' + it.vehicle.id + '?tab=economia' }, [
-            el('div', { class: 'rem-item-title' }, [
-              el('span', { class: 'rem-item-name', text: store.vehicleName(it.vehicle) + ' · Cuota ' + c.numero }),
-              ui.pill(pillTxt, pillCls)
-            ]),
-            el('div', { class: 'rem-item-meta', text: fmt.money(c.monto, it.moneda) + ' · Vence ' + fmt.date(it.vencimiento) })
-          ]),
-          done ? null : el('button', { class: 'btn btn-sm btn-primary', text: tipo === 'pagar' ? 'Pagué' : 'Me pagaron', onclick: function (e) {
-            e.preventDefault(); e.stopPropagation();
-            if (tipo === 'pagar') store.pagarCuota(it.vehicle.id, c.id, hoy); else store.cobrarCuotaVenta(it.vehicle.id, c.id, hoy);
-            ui.toast('Listo', 'success');
-          } })
-        ]);
-      })));
-      return card;
-    }
-    function draw() {
-      ui.qsa('.seg', seg).forEach(function (b, i) { b.classList.toggle('is-active', (i === 0 ? 'pagar' : 'cobrar') === cuotasSubTab); });
-      ui.clear(content);
-      content.appendChild(cuotasSubTab === 'pagar'
-        ? block('💸 Cuotas que tenés que pagar', inst.pagar, 'pagar')
-        : block('💰 Cuotas que te tienen que pagar', inst.cobrar, 'cobrar'));
-    }
+    var tP = totals(inst.pagar), tC = totals(inst.cobrar);
+
+    wrap.appendChild(el('header', { class: 'cb-head' }, [
+      el('h1', { text: 'Cuotas y cobros' }),
+      el('p', { class: 'cb-sub', text: 'A quién cobrar, a quién pagar y cuándo.' })
+    ]));
+
+    var TABS = [['pagar', 'Por pagar', tP], ['cobrar', 'Por cobrar', tC]];
+    var tabBtns = TABS.map(function (t) {
+      var b = el('button', { type: 'button', class: 'cb-tab', dataset: { tab: t[0] } }, [
+        el('span', { class: 'cb-tab-l', text: t[1] }),
+        el('strong', { class: 'cb-tab-v num', text: fmt.money(t[2].falta) }),
+        el('span', { class: 'cb-tab-s ' + (t[2].vencido ? 'neg' : ''), text: t[2].vencido ? 'Vencido ' + fmt.money(t[2].vencido) : (t[2].total ? 'Sin vencidos' : 'Sin cuotas') })
+      ]);
+      b.addEventListener('click', function () { cuotasSubTab = t[0]; draw(); });
+      return b;
+    });
+    wrap.appendChild(el('div', { class: 'cb-tabs', role: 'tablist' }, tabBtns));
+    var content = el('div', { class: 'cb-content' });
     wrap.appendChild(content);
+
+    function dayParts(iso) {
+      var d = fin.parseDate(iso);
+      if (!d) return { n: '–', m: '' };
+      return { n: String(d.getDate()), m: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][d.getMonth()] };
+    }
+
+    function row(it, tipo, listAll) {
+      var c = it.cuota, v = it.vehicle;
+      var done = it.estado === 'pagada' || it.estado === 'cobrada';
+      var persona;
+      if (tipo === 'pagar') persona = (v.purchase && v.purchase.proveedor && v.purchase.proveedor.nombre) || 'Sin proveedor cargado';
+      else persona = (v.sale && v.sale.cliente && v.sale.cliente.nombre) || (v.sale && v.sale.financiacion && v.sale.financiacion.entidad) || 'Sin cliente cargado';
+      var total = listAll.filter(function (x) { return x.vehicle.id === v.id; }).length;
+      var dp = dayParts(it.vencimiento);
+      var tone = done ? 'done' : (it.estado === 'vencida' ? 'overdue' : (it.vencimiento && it.vencimiento <= limIso ? 'soon' : 'later'));
+      var whenTxt = done ? ('Hecha' + ((c.fechaPago || c.fechaCobro) ? ' el ' + fmt.date(c.fechaPago || c.fechaCobro) : '')) : (it.vencimiento ? (tone === 'overdue' ? 'Venció ' : 'Vence ') + fmt.relative(it.vencimiento) : 'Sin fecha');
+      return el('div', { class: 'cb-row cb-' + tone }, [
+        el('div', { class: 'cb-when' }, [el('b', { class: 'num', text: dp.n }), el('small', { text: dp.m })]),
+        el('a', { class: 'cb-main', href: '#/vehiculo/' + v.id + '?tab=economia' }, [
+          el('span', { class: 'cb-person', text: persona }),
+          el('span', { class: 'cb-veh' }, [
+            el('span', { text: [v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || store.vehicleName(v) }),
+            v.patente ? el('span', { class: 'plate plate-sm', text: v.patente }) : null,
+            el('span', { class: 'cb-n', text: 'Cuota ' + c.numero + ' de ' + total })
+          ]),
+          el('span', { class: 'cb-due', text: whenTxt })
+        ]),
+        el('div', { class: 'cb-amt' }, [
+          el('strong', { class: 'num', text: fmt.money(c.monto, it.moneda) }),
+          it.moneda === 'USD' ? el('small', { class: 'num', text: '≈ ' + fmt.money(it.montoARS) }) : null
+        ]),
+        el('div', { class: 'cb-act' }, done ? el('span', { class: 'cb-ok' }, [ui.icon('check'), el('span', { text: tipo === 'pagar' ? 'Pagada' : 'Cobrada' })])
+          : el('button', { class: 'btn btn-sm ' + (it.estado === 'vencida' ? 'btn-primary' : 'btn-ghost'), type: 'button', text: tipo === 'pagar' ? 'Pagué' : 'Me pagaron', onclick: function (e) {
+            e.preventDefault(); e.stopPropagation();
+            if (tipo === 'pagar') store.pagarCuota(v.id, c.id, hoy); else store.cobrarCuotaVenta(v.id, c.id, hoy);
+            ui.toast('Listo', 'success');
+          } }))
+      ]);
+    }
+
+    function group(title, tone, items, tipo, listAll, collapsed) {
+      if (!items.length) return null;
+      var sum = 0; items.forEach(function (it) { sum += it.montoARS; });
+      var head = el('div', { class: 'cb-ghead' }, [
+        el('h3', { text: title }), el('span', { class: 'cb-gn num', text: items.length }), el('span', { class: 'cb-gsum num', text: fmt.money(sum) })
+      ]);
+      var rows = el('div', { class: 'cb-rows' }, items.map(function (it) { return row(it, tipo, listAll); }));
+      if (collapsed) {
+        return el('details', { class: 'cb-group cb-g-' + tone }, [el('summary', {}, head), rows]);
+      }
+      return el('section', { class: 'cb-group cb-g-' + tone }, [head, rows]);
+    }
+
+    function draw() {
+      tabBtns.forEach(function (b) { var on = b.dataset.tab === cuotasSubTab; b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+      ui.clear(content);
+      var tipo = cuotasSubTab === 'cobrar' ? 'cobrar' : 'pagar';
+      var list = tipo === 'pagar' ? inst.pagar : inst.cobrar;
+      var t = tipo === 'pagar' ? tP : tC;
+      if (!list.length) {
+        content.appendChild(el('div', { class: 'ix-clear' }, [ui.icon('card'), el('div', {}, [el('strong', { text: tipo === 'pagar' ? 'No tenés compras en cuotas' : 'No tenés ventas financiadas' }), el('span', { text: 'Cuando cargues cuotas, van a aparecer acá agrupadas por vencimiento.' })])]));
+        return;
+      }
+      var pct = t.total ? Math.round(t.hecho / t.total * 100) : 0;
+      content.appendChild(el('div', { class: 'cb-prog' }, [
+        el('div', { class: 'cb-prog-top' }, [
+          el('span', {}, [(tipo === 'pagar' ? 'Pagado ' : 'Cobrado '), el('b', { class: 'num', text: fmt.money(t.hecho) }), ' de ', el('b', { class: 'num', text: fmt.money(t.total) })]),
+          el('span', { class: 'num cb-prog-pct', text: pct + '%' })
+        ]),
+        el('div', { class: 'cb-bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + pct + '%' }))
+      ]));
+      var venc = list.filter(function (i) { return i.estado === 'vencida'; });
+      var pend = list.filter(function (i) { return i.estado === 'pendiente'; });
+      var sem = pend.filter(function (i) { return i.vencimiento && i.vencimiento <= limIso; });
+      var prox = pend.filter(function (i) { return !(i.vencimiento && i.vencimiento <= limIso); });
+      var done = list.filter(function (i) { return i.estado === 'pagada' || i.estado === 'cobrada'; });
+      [group('Vencidas', 'overdue', venc, tipo, list),
+       group('Esta semana', 'soon', sem, tipo, list),
+       group('Próximas', 'later', prox, tipo, list),
+       group('Completadas', 'done', done, tipo, list, true)].forEach(function (g) { if (g) content.appendChild(g); });
+    }
     draw();
     root.appendChild(wrap);
   }
 
-  /* ======================= GASTOS DEL NEGOCIO ===================== */
+  /* ================== GASTOS DEL NEGOCIO (libro contable) ================ */
+  // Registro de movimientos: fecha, concepto, categoría e importe en columnas
+  // alineadas, agrupado por mes. Mismos datos y mismo formulario de alta/edición.
+  var gastosFiltro = { q: '', cat: '', frec: '' };
+  var MESES_G = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   function gastosNegocioView(root) {
-    var wrap = el('div', { class: 'page' });
-    var head = pageHead('Gastos del negocio', 'Alquiler, sueldos, seguros… lo que no es de un auto en particular');
-    head.appendChild(el('button', { class: 'btn btn-primary', html: '<span>＋</span> Nuevo gasto', onclick: function () { App.forms.fixedExpenseForm(); } }));
-    wrap.appendChild(head);
-
+    var wrap = el('div', { class: 'page gl' });
     var list = store.getFixedExpenses();
     var mr = fin.monthRange(new Date()), yr = fin.yearRange(new Date());
-    wrap.appendChild(el('div', { class: 'stat-grid stat-grid-4' }, [
-      miniStat('Este mes', fmt.money(fin.fixedExpensesInPeriod(mr.from, mr.to))),
-      miniStat('Este año', fmt.money(fin.fixedExpensesInPeriod(yr.from, yr.to))),
-      miniStat('Gastos cargados', fmt.num(list.length))
+
+    wrap.appendChild(el('header', { class: 'gl-head' }, [
+      el('div', {}, [
+        el('h1', { text: 'Gastos del negocio' }),
+        el('p', { class: 'gl-sub' }, [
+          el('span', {}, ['Este mes ', el('b', { class: 'num', text: fmt.money(fin.fixedExpensesInPeriod(mr.from, mr.to)) })]),
+          el('i', { 'aria-hidden': 'true' }),
+          el('span', {}, ['Este año ', el('b', { class: 'num', text: fmt.money(fin.fixedExpensesInPeriod(yr.from, yr.to)) })]),
+          el('i', { 'aria-hidden': 'true' }),
+          el('span', { class: 'num', text: fmt.num(list.length) + (list.length === 1 ? ' registrado' : ' registrados') })
+        ])
+      ]),
+      el('button', { class: 'btn btn-primary', type: 'button', onclick: function () { App.forms.fixedExpenseForm(); } }, [ui.icon('plus'), el('span', { text: 'Nuevo gasto' })])
     ]));
 
     if (!list.length) {
-      wrap.appendChild(el('div', { class: 'card' }, [ui.emptyState('Cargá el alquiler, los sueldos, el seguro de la flota… así la ganancia del negocio es la de verdad.', '🏢')]));
+      wrap.appendChild(el('div', { class: 'ix-clear' }, [ui.icon('briefcase'), el('div', {}, [el('strong', { text: 'Todavía no cargaste gastos del negocio' }), el('span', { text: 'Cargá el alquiler, los sueldos, el seguro de la flota… así la ganancia del negocio es la de verdad.' })])]));
       root.appendChild(wrap); return;
     }
-    // Tarjetas en vez de tabla (mismo componente que Cuotas/Alertas): toda
-    // la fila es tocable y abre la edición, sin scroll horizontal en mobile.
-    var listWrap = el('div', { class: 'rem-list' }, list.slice().sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); }).map(function (f) {
-      var meta = fmt.money(f.monto, f.moneda) + ' · ' + store.categoriaLabel(f.categoria) + ' · ' + (f.frecuencia === 'mensual' ? 'Todos los meses' : 'Una vez');
-      return el('div', { class: 'rem-item rem-auto' }, [
-        el('span', { class: 'rem-ico rem-auto-ico', text: '📌' }),
-        el('a', { class: 'rem-item-body', href: '#', onclick: function (e) { e.preventDefault(); App.forms.fixedExpenseForm(f); } }, [
-          el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: f.concepto })]),
-          el('div', { class: 'rem-item-meta', text: meta + ' · ' + fmt.date(f.fecha) + (f.hasta ? ' → ' + fmt.date(f.hasta) : '') })
-        ])
-      ]);
-    }));
-    wrap.appendChild(el('div', { class: 'card' }, [listWrap]));
+
+    var cats = []; list.forEach(function (f) { if (cats.indexOf(f.categoria) < 0) cats.push(f.categoria); });
+    var q = ui.input({ value: gastosFiltro.q, placeholder: 'Buscar por concepto o categoría', class: 'input' });
+    var selCat = ui.select([{ value: '', label: 'Todas las categorías' }].concat(cats.map(function (c) { return { value: c, label: store.categoriaLabel(c) }; })), gastosFiltro.cat, { class: 'input select' });
+    var selFrec = ui.select([{ value: '', label: 'Todos' }, { value: 'mensual', label: 'Mensuales' }, { value: 'unica', label: 'Únicos' }], gastosFiltro.frec, { class: 'input select' });
+    wrap.appendChild(el('div', { class: 'gl-bar' }, [
+      el('label', { class: 'dms-search' }, [ui.icon('search'), q]),
+      el('div', { class: 'gl-filters' }, [selCat, selFrec])
+    ]));
+    var box = el('div', { class: 'gl-sheet' });
+    wrap.appendChild(box);
+    q.addEventListener('input', function () { gastosFiltro.q = q.value; draw(); });
+    selCat.addEventListener('change', function () { gastosFiltro.cat = selCat.value; draw(); });
+    selFrec.addEventListener('change', function () { gastosFiltro.frec = selFrec.value; draw(); });
+
+    function draw() {
+      ui.clear(box);
+      var term = gastosFiltro.q.trim().toLowerCase();
+      var items = list.filter(function (f) {
+        if (gastosFiltro.cat && f.categoria !== gastosFiltro.cat) return false;
+        if (gastosFiltro.frec && f.frecuencia !== gastosFiltro.frec) return false;
+        if (term && ((f.concepto || '') + ' ' + store.categoriaLabel(f.categoria)).toLowerCase().indexOf(term) < 0) return false;
+        return true;
+      }).sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); });
+      if (!items.length) { box.appendChild(ui.emptyState('No hay gastos que coincidan.', 'search')); return; }
+      var table = el('table', { class: 'gl-table' });
+      table.appendChild(el('thead', {}, el('tr', {}, [
+        el('th', { class: 'g-fecha', text: 'Fecha' }), el('th', { class: 'g-concepto', text: 'Concepto' }),
+        el('th', { class: 'g-cat', text: 'Categoría' }), el('th', { class: 'g-frec', text: 'Frecuencia' }), el('th', { class: 'g-monto num', text: 'Importe' })
+      ])));
+      var tb = el('tbody'); var lastKey = null;
+      items.forEach(function (f) {
+        var d = fin.parseDate(f.fecha);
+        var key = d ? d.getFullYear() * 100 + d.getMonth() : 0;
+        if (key !== lastKey) {
+          tb.appendChild(el('tr', { class: 'gl-month' }, el('td', { colspan: '5', text: d ? MESES_G[d.getMonth()] + ' ' + d.getFullYear() : 'Sin fecha' })));
+          lastKey = key;
+        }
+        tb.appendChild(el('tr', { class: 'gl-row', tabindex: '0', onclick: function () { App.forms.fixedExpenseForm(f); }, onkeydown: function (e) { if (e.key === 'Enter') App.forms.fixedExpenseForm(f); } }, [
+          el('td', { class: 'g-fecha num', dataset: { label: 'Fecha' }, text: fmt.date(f.fecha) }),
+          el('td', { class: 'g-concepto' }, [el('span', { class: 'g-name', text: f.concepto }), f.hasta ? el('span', { class: 'g-note', text: 'Hasta ' + fmt.date(f.hasta) }) : null]),
+          el('td', { class: 'g-cat', text: store.categoriaLabel(f.categoria) }),
+          el('td', { class: 'g-frec', text: f.frecuencia === 'mensual' ? 'Todos los meses' : 'Una vez' }),
+          el('td', { class: 'g-monto num', text: fmt.money(f.monto, f.moneda) })
+        ]));
+      });
+      table.appendChild(tb);
+      box.appendChild(el('div', { class: 'gl-scroll' }, table));
+      box.appendChild(el('div', { class: 'gl-foot', text: 'Mostrando ' + items.length + ' de ' + list.length + ' · tocá un movimiento para editarlo' }));
+    }
+    draw();
     root.appendChild(wrap);
   }
 
@@ -1328,130 +1668,101 @@
   // excelAutosaveCard/datosCard/parametrosCard) — ninguna lógica cambió,
   // solo dónde se muestra.
   var ajustesScreen = 'home';
-  function ajustesView(root) {
-    var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Ajustes', 'Configurá la aplicación y tu cuenta'));
 
+  // Componentes de configuración (SaaS): título + descripción a la izquierda,
+  // control a la derecha, agrupados con separadores finos.
+  function cfgRow(title, desc, ctl) {
+    return el('div', { class: 'cfg-row' }, [
+      el('div', { class: 'cfg-row-txt' }, [el('strong', { text: title }), desc ? el('span', { text: desc }) : null]),
+      ctl ? el('div', { class: 'cfg-row-ctl' }, ctl) : null
+    ]);
+  }
+  function cfgGroup(rows, cls) { return el('div', { class: 'cfg-group' + (cls ? ' ' + cls : '') }, rows.filter(Boolean)); }
+  function cfgSec(title, desc, kids, cls) {
+    return el('section', { class: 'cfg-sec' + (cls ? ' ' + cls : '') }, [
+      el('header', { class: 'cfg-sec-h' }, [el('h2', { text: title }), desc ? el('p', { text: desc }) : null])
+    ].concat(kids));
+  }
+  function cfgSub(title) { return el('h3', { class: 'cfg-sub', text: title }); }
+
+  // Pantalla principal: navegación interna a la izquierda (selector horizontal
+  // en celular) y, a la derecha, la sección elegida. Cada sección reutiliza la
+  // misma lógica de siempre (cuenta, usuarios, avisos, parámetros, datos,
+  // copias, Excel y borrado) — ninguna lógica cambió, solo cómo se muestra.
+  function ajustesView(root) {
+    var wrap = el('div', { class: 'page cfg' });
     var online = !!(App.auth && App.auth.enabled);
     var isAdmin = online && App.auth.isAdmin();
     var showDanger = !online || isAdmin;
 
-    var content = el('div', {});
-    wrap.appendChild(content);
+    var SECTIONS = [['apariencia', 'Apariencia', aparienciaSec]];
+    if (online) SECTIONS.push(['cuenta', 'Mi cuenta', cuentaSec]);
+    if (isAdmin) SECTIONS.push(['usuarios', 'Usuarios', usuariosSec]);
+    SECTIONS.push(['preferencias', 'Avisos', avisosSec], ['financiero', 'Financiero', parametrosSec], ['datos', 'Datos y copias', datosSec], ['sync', 'Excel automático', excelSec]);
+    if (showDanger) SECTIONS.push(['peligro', 'Zona peligrosa', peligroSec]);
+
+    var navBtns = SECTIONS.map(function (s) {
+      var b = el('button', { type: 'button', class: 'cfg-nav-i' + (s[0] === 'peligro' ? ' is-danger' : ''), dataset: { key: s[0] }, text: s[1] });
+      b.addEventListener('click', function () { ajustesScreen = s[0]; render(); });
+      return b;
+    });
+    var content = el('div', { class: 'cfg-content' });
+    wrap.appendChild(el('div', { class: 'cfg-layout' }, [
+      el('div', { class: 'cfg-side' }, [
+        el('h1', { text: 'Ajustes' }), el('p', { class: 'cfg-nav-sub', text: 'Cómo funciona y se ve tu aplicación.' }),
+        el('nav', { class: 'cfg-nav', 'aria-label': 'Secciones de Ajustes' }, navBtns)
+      ]),
+      content
+    ]));
     root.appendChild(wrap);
 
-    function goScreen(key) { ajustesScreen = key; render(); }
-    function volverLink() {
-      return el('a', { class: 'back-link', href: '#', html: '‹ Volver a Ajustes', onclick: function (e) { e.preventDefault(); goScreen('home'); } });
-    }
-
-    var SUBSCREENS = {
-      cuenta: function () { return cuentaCard(); },
-      usuarios: function () { return usuariosCard(); },
-      preferencias: function () { return avisosCard(); },
-      financiero: function () { return parametrosCard(); },
-      datos: function () { return [datosCard(), snapshotsCard()]; },
-      sync: function () { return excelAutosaveCard(); },
-      peligro: function () { return resetCard(); }
-    };
-
     function render() {
+      var cur = SECTIONS.filter(function (s) { return s[0] === ajustesScreen; })[0] || SECTIONS[0];
+      ajustesScreen = cur[0];
+      navBtns.forEach(function (b) { var on = b.dataset.key === cur[0]; b.classList.toggle('is-active', on); b.setAttribute('aria-current', on ? 'page' : 'false'); });
       ui.clear(content);
-      if (ajustesScreen !== 'home' && SUBSCREENS[ajustesScreen]) {
-        content.appendChild(volverLink());
-        ui.appendChildren(content, SUBSCREENS[ajustesScreen]());
-        return;
-      }
-      ajustesScreen = 'home';
-
-      var cuentaRows = [];
-      if (online) {
-        cuentaRows.push(settingsRow('👤', 'Mi cuenta', (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || 'Tu perfil y sesión', function () { goScreen('cuenta'); }));
-        if (isAdmin) cuentaRows.push(settingsRow('👥', 'Usuarios', 'Quién puede entrar a la app', function () { goScreen('usuarios'); }));
-      }
-      cuentaRows.push(settingsRow('⚙️', 'Preferencias', 'Avisos del navegador', function () { goScreen('preferencias'); }));
-
-      [
-        settingsSection('Cuenta', cuentaRows),
-        settingsSection('Negocio', [
-          settingsRow('💰', 'Configuración financiera', 'Dólar de referencia y alertas', function () { goScreen('financiero'); })
-        ]),
-        settingsSection('Datos y sistema', [
-          settingsRow('💾', 'Datos', 'Papelera, exportar y copias de seguridad', function () { goScreen('datos'); }),
-          settingsRow('🔄', 'Sincronización', 'Guardado automático en Excel', function () { goScreen('sync'); })
-        ]),
-        showDanger ? settingsSection('Zona peligrosa', [
-          settingsRow('⚠️', 'Acciones avanzadas', 'Borrar todos los datos de la app', function () { goScreen('peligro'); }, true)
-        ]) : null
-      ].filter(Boolean).forEach(function (s) { content.appendChild(s); });
+      ui.appendChildren(content, cur[2]());
     }
-
     render();
   }
 
-  function settingsRow(icon, title, desc, onclick, danger) {
-    return el('div', { class: 'settings-row' + (danger ? ' is-danger' : ''), onclick: onclick }, [
-      el('span', { class: 'settings-row-ico', text: icon }),
-      el('div', { class: 'settings-row-body' }, [
-        el('strong', { text: title }),
-        el('span', { text: desc })
-      ]),
-      el('span', { class: 'settings-row-chevron', text: '›' })
-    ]);
-  }
-  function settingsSection(title, rows) {
-    rows = (rows || []).filter(Boolean);
-    if (!rows.length) return null;
-    var danger = rows.some(function (r) { return r.classList.contains('is-danger'); });
-    return el('div', { class: 'settings-section' }, [
-      el('div', { class: 'form-section-title', text: title }),
-      el('div', { class: 'settings-group' + (danger ? ' danger-zone' : '') }, rows)
-    ]);
-  }
-
-  // --- Datos: Papelera y Exportar (mismas páginas de siempre) ---
-  function datosCard() {
-    return el('div', { class: 'card' }, [
-      el('h3', { text: '🗂️ Datos' }),
-      el('div', { class: 'row-btns' }, [
-        el('a', { class: 'btn btn-ghost', href: '#/papelera', html: '<span>🗑️</span> Papelera' }),
-        el('a', { class: 'btn btn-ghost', href: '#/exportar', html: '<span>📤</span> Exportar' })
-      ])
-    ]);
+  // --- Apariencia: claro / oscuro / automático (se aplica al instante y se recuerda) ---
+  function aparienciaSec() {
+    var OPTS = [['light', 'sun', 'Claro'], ['dark', 'moon', 'Oscuro'], ['auto', 'monitor', 'Automático']];
+    var seg = el('div', { class: 'seg-control theme-seg', role: 'radiogroup', 'aria-label': 'Tema de la aplicación' });
+    var btns = OPTS.map(function (o) {
+      var b = el('button', { type: 'button', class: 'seg', role: 'radio', dataset: { theme: o[0] } }, [ui.icon(o[1]), el('span', { text: o[2] })]);
+      b.addEventListener('click', function () { ui.theme.set(o[0]); sync(); });
+      return b;
+    });
+    btns.forEach(function (b) { seg.appendChild(b); });
+    function sync() {
+      var cur = ui.theme.get();
+      btns.forEach(function (b) {
+        var on = b.dataset.theme === cur;
+        b.classList.toggle('is-active', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    sync();
+    return [cfgSec('Apariencia', 'Cómo se ve la aplicación en este dispositivo.', [
+      cfgGroup([cfgRow('Tema', 'Automático sigue la preferencia de tu dispositivo.', seg)])
+    ])];
   }
 
-  function parametrosCard() {
-    var s = store.getState().settings;
-    var fDolar = ui.moneyInput({ value: s.dolarActual });
-    var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
-    var fCuota = ui.input({ inputmode: 'numeric', value: s.cuotaProximaDias });
-    return el('div', { class: 'card' }, [
-      el('h3', { text: 'Parámetros' }),
-      el('div', { class: 'grid-2' }, [
-        ui.field('Cotización actual del dólar', fDolar, 'Referencia general. Las comparaciones permiten ingresar otra puntual.'),
-        ui.field('Alerta: días en stock', fDias),
-        ui.field('Alerta: días antes de vencer una cuota', fCuota)
-      ]),
-      el('button', { class: 'btn btn-primary', text: 'Guardar ajustes', onclick: function () {
-        store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 });
-        ui.toast('Ajustes guardados', 'success'); App.router.render();
-      } })
-    ]);
-  }
-
-  function cuentaCard() {
+  function cuentaSec() {
     var p = App.auth.profile || {};
-    return el('div', { class: 'card' }, [
-      el('h3', { text: '👤 Mi cuenta' }),
-      el('p', { class: 'form-help', text: (p.nombre ? p.nombre + ' · ' : '') + (p.email || '') + ' · ' + (p.role === 'admin' ? 'Administrador' : 'Usuario') }),
-      el('button', { class: 'btn btn-ghost', text: 'Cerrar sesión', onclick: function () { App.auth.logout(); } })
-    ]);
+    return [cfgSec('Mi cuenta', 'Tu perfil y tu sesión.', [
+      cfgGroup([
+        cfgRow('Nombre', null, el('span', { class: 'cfg-val', text: p.nombre || '—' })),
+        cfgRow('Email', null, el('span', { class: 'cfg-val', text: p.email || '—' })),
+        cfgRow('Rol', null, el('span', { class: 'cfg-val', text: p.role === 'admin' ? 'Administrador' : 'Usuario' })),
+        cfgRow('Sesión', 'Salí de la aplicación en este dispositivo.', el('button', { class: 'btn btn-ghost', type: 'button', text: 'Cerrar sesión', onclick: function () { App.auth.logout(); } }))
+      ])
+    ])];
   }
 
-  function usuariosCard() {
-    var card = el('div', { class: 'card' });
-    card.appendChild(el('h3', { text: '👥 Usuarios' }));
-    card.appendChild(el('p', { class: 'form-help', text: 'Todos los usuarios ven y editan la misma información. Los cambios se ven al instante en las demás computadoras.' }));
+  function usuariosSec() {
+    var card = el('div', { class: 'cfg-users' });
 
     var list = el('div', { class: 'user-list' }, [el('p', { class: 'muted', text: 'Cargando usuarios…' })]);
     card.appendChild(list);
@@ -1522,7 +1833,7 @@
     var nEmail = ui.input({ type: 'email', placeholder: 'email@ejemplo.com', autocomplete: 'off', inputmode: 'email' });
     var nPass = ui.input({ type: 'text', placeholder: 'Contraseña (6+)', autocomplete: 'off' });
     var nRole = ui.select([{ value: 'usuario', label: 'Usuario' }, { value: 'admin', label: 'Administrador' }], 'usuario');
-    card.appendChild(el('div', { class: 'card-inset' }, [
+    var alta = el('div', { class: 'card-inset' }, [
       el('h4', { text: 'Agregar usuario' }),
       el('div', { class: 'grid-2' }, [
         ui.field('Nombre', nNombre),
@@ -1541,106 +1852,112 @@
           })
           .catch(function (e) { ui.toast(e.message, 'error'); });
       } })
-    ]));
+    ]);
 
     refresh();
-    return card;
+    return [cfgSec('Usuarios', 'Todos los usuarios ven y editan la misma información. Los cambios se ven al instante en las demás computadoras.', [card, alta])];
   }
 
-  function avisosCard() {
-    var card = el('div', { class: 'card' });
-    card.appendChild(el('h3', { text: '🔔 Avisos del navegador' }));
+  function avisosSec() {
+    var rows = [];
     if (!App.notify || !App.notify.supported()) {
-      card.appendChild(el('p', { class: 'form-help', text: 'Este navegador no permite avisos. Igual, cada vez que abrís la app te muestra lo que tenés pendiente.' }));
-      return card;
-    }
-    var st = App.notify.state();
-    if (st === 'granted') {
-      card.appendChild(el('p', {}, [el('span', { class: 'badge badge-ok', text: 'Activados' })]));
-      card.appendChild(el('p', { class: 'form-help', text: 'Cuando abrís la app y tenés cuotas o recordatorios vencidos o para hoy, te llega un aviso.' }));
-    } else if (st === 'denied') {
-      card.appendChild(el('p', { class: 'form-help', text: 'Bloqueaste los avisos para este sitio. Se cambia desde el candado 🔒 al lado de la dirección web.' }));
+      rows.push(cfgRow('Avisos del navegador', 'Este navegador no permite avisos. Igual, cada vez que abrís la app te muestra lo que tenés pendiente.'));
     } else {
-      card.appendChild(el('p', { class: 'muted', text: 'Recibí un aviso al abrir la app cuando haya algo vencido o para hoy.' }));
-      card.appendChild(el('button', { class: 'btn btn-primary', text: 'Activar avisos', onclick: function () { App.notify.request().then(function () { App.router.render(); }); } }));
+      var st = App.notify.state();
+      if (st === 'granted') {
+        rows.push(cfgRow('Avisos del navegador', 'Cuando abrís la app y tenés cuotas o recordatorios vencidos o para hoy, te llega un aviso.', el('span', { class: 'badge badge-ok', text: 'Activados' })));
+      } else if (st === 'denied') {
+        rows.push(cfgRow('Avisos del navegador', 'Bloqueaste los avisos para este sitio. Se cambia desde el candado que está al lado de la dirección web.', el('span', { class: 'badge badge-danger', text: 'Bloqueados' })));
+      } else {
+        rows.push(cfgRow('Avisos del navegador', 'Recibí un aviso al abrir la app cuando haya algo vencido o para hoy.', el('button', { class: 'btn btn-primary', type: 'button', text: 'Activar avisos', onclick: function () { App.notify.request().then(function () { App.router.render(); }); } })));
+      }
     }
-    return card;
+    return [cfgSec('Avisos', 'Cómo te avisa la aplicación de lo que vence.', [cfgGroup(rows)])];
   }
 
-  function snapshotsCard() {
-    var card = el('div', { class: 'card' });
-    card.appendChild(el('h3', { text: '↩️ Restaurar una copia anterior' }));
+  function parametrosSec() {
+    var s = store.getState().settings;
+    var fDolar = ui.moneyInput({ value: s.dolarActual });
+    var fDias = ui.input({ inputmode: 'numeric', value: s.diasStockAlerta });
+    var fCuota = ui.input({ inputmode: 'numeric', value: s.cuotaProximaDias });
+    return [cfgSec('Financiero', 'Valores de referencia y umbrales de las alertas.', [
+      cfgGroup([
+        cfgRow('Cotización actual del dólar', 'Referencia general. Las comparaciones permiten ingresar otra puntual.', fDolar),
+        cfgRow('Alerta: días en stock', 'Un vehículo se marca como "mucho tiempo" al llegar a esta cantidad de días.', fDias),
+        cfgRow('Alerta: días antes de vencer una cuota', 'Cuántos días antes te avisamos de una cuota por vencer.', fCuota)
+      ]),
+      el('div', { class: 'cfg-save' }, el('button', { class: 'btn btn-primary', type: 'button', text: 'Guardar ajustes', onclick: function () {
+        store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 });
+        ui.toast('Ajustes guardados', 'success'); App.router.render();
+      } }))
+    ])];
+  }
+
+  function datosSec() {
     var snaps = store.getSnapshots();
+    var snapRows = [];
     if (!snaps.length) {
-      card.appendChild(el('p', { class: 'form-help', text: 'La app guarda sola una copia por día (las últimas 5). Si borrás algo sin querer, acá lo podés volver a como estaba.' }));
-      return card;
-    }
-    card.appendChild(el('p', { class: 'form-help', text: 'Copias automáticas de los últimos días. Restaurar reemplaza los datos actuales (antes de hacerlo se guarda otra copia).' }));
-    snaps.forEach(function (sn) {
-      card.appendChild(el('div', { class: 'export-row' }, [
-        el('span', { text: fmt.datetime(sn.ts) + ' · ' + sn.autos + ' autos' }),
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Restaurar', onclick: function () {
+      snapRows.push(cfgRow('Sin copias todavía', 'La app guarda sola una copia por día (las últimas 5). Si borrás algo sin querer, acá lo podés volver a como estaba.'));
+    } else {
+      snaps.forEach(function (sn) {
+        snapRows.push(cfgRow(fmt.datetime(sn.ts), sn.autos + (sn.autos === 1 ? ' auto' : ' autos'), el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Restaurar', onclick: function () {
           ui.confirm({ title: 'Restaurar copia', message: 'Los datos actuales se reemplazan por la copia del ' + fmt.datetime(sn.ts) + '. ¿Seguir?', danger: true, confirmText: 'Restaurar' })
             .then(function (ok) { if (ok) { if (store.restoreSnapshot(sn.ts)) { ui.toast('Copia restaurada', 'success'); App.router.go(''); } else ui.toast('No se pudo restaurar', 'error'); } });
-        } })
-      ]));
-    });
-    return card;
+        } })));
+      });
+    }
+    return [cfgSec('Datos y copias', 'Papelera, exportación y copias de seguridad.', [
+      cfgGroup([
+        cfgRow('Papelera', 'Vehículos eliminados: restauralos o borralos definitivamente.', el('a', { class: 'btn btn-ghost', href: '#/papelera' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')])),
+        cfgRow('Exportar', 'Excel completo, copia de seguridad (JSON) y archivos CSV.', el('a', { class: 'btn btn-ghost', href: '#/exportar' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')]))
+      ]),
+      cfgSub('Copias automáticas'),
+      el('p', { class: 'cfg-note', text: snaps.length ? 'Copias de los últimos días. Restaurar reemplaza los datos actuales (antes de hacerlo se guarda otra copia).' : '' }),
+      cfgGroup(snapRows)
+    ])];
   }
 
-  function resetCard() {
-    var fWord = ui.input({ placeholder: 'Escribí BORRAR', autocomplete: 'off' });
-    return el('div', { class: 'card danger-zone' }, [
-      el('h3', { text: '🗑️ Borrar todo y empezar de cero' }),
-      el('p', { class: 'muted', text: (App.auth && App.auth.enabled)
-        ? 'Elimina TODOS los autos, ventas, gastos e historial de la nube, para TODOS los usuarios. Primero se descarga una copia de seguridad.'
-        : 'Elimina TODOS los autos, ventas, gastos e historial de este navegador. Primero se descarga una copia de seguridad automática.' }),
-      ui.field('Para confirmar, escribí la palabra BORRAR', fWord),
-      el('button', { class: 'btn btn-danger', text: 'Borrar todo', onclick: function () {
-        if (fWord.value.trim().toUpperCase() !== 'BORRAR') { ui.toast('Escribí BORRAR para confirmar', 'error'); return; }
-        ui.confirm({ title: 'Última confirmación', message: 'Se borra todo. Esto no se puede deshacer (salvo con la copia que se está descargando). ¿Seguro?', danger: true, confirmText: 'Sí, borrar todo' })
-          .then(function (ok) {
-            if (!ok) return;
-            try { ui.downloadFile('paginatoto-ANTES-DE-BORRAR-' + store.todayISO() + '.json', store.exportJSON(), 'application/json'); } catch (e) {}
-            setTimeout(function () { store.resetAll(); ui.toast('Datos borrados. Guardá el archivo que se descargó.'); App.router.go(''); }, 400);
-          });
-      } })
-    ]);
-  }
-
-  function excelAutosaveCard() {
-    var card = el('div', { class: 'card' });
-    card.appendChild(el('h3', { text: '📊 Guardar automáticamente en Excel' }));
-
+  function excelSec() {
+    var rows = [];
     if (!App.excel || !App.excel.supported()) {
-      card.appendChild(el('p', { class: 'muted', text: 'Elegís un archivo Excel una vez y la app lo actualiza sola con cada cosa que hacés.' }));
-      card.appendChild(el('p', { class: 'form-help', text: 'Necesita Google Chrome o Microsoft Edge en una computadora. En este navegador, usá el botón “Descargar Excel” en la sección Exportar cada vez que quieras la copia al día.' }));
-      return card;
-    }
-
-    var s = App.excel.status();
-    if (s.on && !s.needsReconnect) {
-      card.appendChild(el('p', {}, [
-        el('span', { class: 'badge badge-ok', text: 'Activado' }),
-        el('span', { text: '  Archivo: ' + (s.name || 'PaginaToto.xlsx') })
-      ]));
-      card.appendChild(el('p', { class: 'form-help', text: 'El Excel se actualiza solo con cada cambio' + (s.lastSaved ? ' · último guardado ' + fmt.datetime(s.lastSaved.getTime()) : '') + '.' }));
-      card.appendChild(el('div', { class: 'row-btns' }, [
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Cambiar archivo', onclick: function () { App.excel.pickFile(); } }),
-        el('button', { class: 'btn btn-sm btn-danger-ghost', text: 'Desactivar', onclick: function () { App.excel.disable(); ui.toast('Guardado automático desactivado'); } })
-      ]));
-    } else if (s.on && s.needsReconnect) {
-      card.appendChild(el('p', {}, [el('span', { class: 'badge badge-warn', text: 'Reconectar' })]));
-      card.appendChild(el('p', { class: 'form-help', text: 'Después de cerrar y volver a abrir la app, el navegador pide permiso otra vez para escribir el archivo. Tocá el botón y aceptá.' }));
-      card.appendChild(el('div', { class: 'row-btns' }, [
-        el('button', { class: 'btn btn-sm btn-primary', text: 'Reconectar archivo', onclick: function () { App.excel.reconnect(); } }),
-        el('button', { class: 'btn btn-sm btn-danger-ghost', text: 'Desactivar', onclick: function () { App.excel.disable(); ui.toast('Guardado automático desactivado'); } })
-      ]));
+      rows.push(cfgRow('Guardado automático en Excel', 'Elegís un archivo Excel una vez y la app lo actualiza sola con cada cosa que hacés. Necesita Google Chrome o Microsoft Edge en una computadora. En este navegador, usá “Descargar Excel” en Exportar cada vez que quieras la copia al día.'));
     } else {
-      card.appendChild(el('p', { class: 'muted', text: 'Elegí un archivo Excel y la app lo va a actualizar sola con cada cambio (autos, ventas, gastos, recordatorios, todo).' }));
-      card.appendChild(el('button', { class: 'btn btn-primary', html: '<span>📄</span> Elegir archivo Excel', onclick: function () { App.excel.pickFile(); } }));
+      var s = App.excel.status();
+      if (s.on && !s.needsReconnect) {
+        rows.push(cfgRow('Guardado automático', 'El Excel se actualiza solo con cada cambio' + (s.lastSaved ? ' · último guardado ' + fmt.datetime(s.lastSaved.getTime()) : '') + '.', el('span', { class: 'badge badge-ok', text: 'Activado' })));
+        rows.push(cfgRow('Archivo', s.name || 'PaginaToto.xlsx', el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Cambiar archivo', onclick: function () { App.excel.pickFile(); } })));
+        rows.push(cfgRow('Desactivar', 'Deja de actualizar el archivo automáticamente.', el('button', { class: 'btn btn-sm btn-danger-ghost', type: 'button', text: 'Desactivar', onclick: function () { App.excel.disable(); ui.toast('Guardado automático desactivado'); } })));
+      } else if (s.on && s.needsReconnect) {
+        rows.push(cfgRow('Reconectar archivo', 'Después de cerrar y volver a abrir la app, el navegador pide permiso otra vez para escribir el archivo. Tocá el botón y aceptá.', el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Reconectar archivo', onclick: function () { App.excel.reconnect(); } })));
+        rows.push(cfgRow('Desactivar', 'Deja de actualizar el archivo automáticamente.', el('button', { class: 'btn btn-sm btn-danger-ghost', type: 'button', text: 'Desactivar', onclick: function () { App.excel.disable(); ui.toast('Guardado automático desactivado'); } })));
+      } else {
+        rows.push(cfgRow('Guardado automático', 'Elegí un archivo Excel y la app lo va a actualizar sola con cada cambio (autos, ventas, gastos, recordatorios, todo).', el('button', { class: 'btn btn-primary', type: 'button', text: 'Elegir archivo Excel', onclick: function () { App.excel.pickFile(); } })));
+      }
     }
-    return card;
+    return [cfgSec('Excel automático', 'Mantené un archivo Excel siempre al día.', [cfgGroup(rows)])];
+  }
+
+  function peligroSec() {
+    var fWord = ui.input({ placeholder: 'Escribí BORRAR', autocomplete: 'off' });
+    return [cfgSec('Zona peligrosa', 'Acciones que no se pueden deshacer.', [
+      cfgGroup([
+        cfgRow('Borrar todo y empezar de cero', (App.auth && App.auth.enabled)
+          ? 'Elimina TODOS los autos, ventas, gastos e historial de la nube, para TODOS los usuarios. Primero se descarga una copia de seguridad.'
+          : 'Elimina TODOS los autos, ventas, gastos e historial de este navegador. Primero se descarga una copia de seguridad automática.'),
+        el('div', { class: 'cfg-row cfg-confirm' }, [
+          el('div', { class: 'cfg-row-txt' }, [el('strong', { text: 'Confirmación' }), el('span', { text: 'Para continuar, escribí la palabra BORRAR.' })]),
+          el('div', { class: 'cfg-row-ctl cfg-row-ctl-col' }, [fWord, el('button', { class: 'btn btn-danger', type: 'button', text: 'Borrar todo', onclick: function () {
+            if (fWord.value.trim().toUpperCase() !== 'BORRAR') { ui.toast('Escribí BORRAR para confirmar', 'error'); return; }
+            ui.confirm({ title: 'Última confirmación', message: 'Se borra todo. Esto no se puede deshacer (salvo con la copia que se está descargando). ¿Seguro?', danger: true, confirmText: 'Sí, borrar todo' })
+              .then(function (ok) {
+                if (!ok) return;
+                try { ui.downloadFile('paginatoto-ANTES-DE-BORRAR-' + store.todayISO() + '.json', store.exportJSON(), 'application/json'); } catch (e) {}
+                setTimeout(function () { store.resetAll(); ui.toast('Datos borrados. Guardá el archivo que se descargó.'); App.router.go(''); }, 400);
+              });
+          } })])
+        ])
+      ], 'cfg-danger')
+    ], 'cfg-sec-danger')];
   }
 
   /* ------------------------------- helpers --------------------------- */

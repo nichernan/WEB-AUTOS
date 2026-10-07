@@ -11,30 +11,32 @@
   // de "Ajustes". Las rutas siguen existiendo igual, solo dejaron de
   // aparecer como ítems propios del menú.
   var NAV = [
-    { path: '', icon: '🏠', label: 'Vehículos' },
-    { path: 'economia', icon: '💰', label: 'Economía' },
-    { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
-    { path: 'alertas', icon: '🔔', label: 'Alertas' },
-    { path: 'historial', icon: '🕓', label: 'Historial' },
-    { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
+    { path: '', icon: 'home', label: 'Inicio' },
+    { path: 'vehiculos', icon: 'car', label: 'Vehículos' },
+    { path: 'economia', icon: 'chart', label: 'Economía' },
+    { path: 'contactos', icon: 'users', label: 'Clientes y proveedores', short: 'Clientes' },
+    { path: 'alertas', icon: 'bell', label: 'Alertas' },
+    { path: 'historial', icon: 'clock', label: 'Historial' },
+    { path: 'ajustes', icon: 'settings', label: 'Ajustes' }
   ];
 
   // Barra inferior para celular (accesos directos más usados)
   var BOTTOM_NAV = [
-    { path: '', icon: '🏠', label: 'Vehículos' },
-    { path: 'economia', icon: '💰', label: 'Economía' },
-    { path: 'cuotas', icon: '💳', label: 'Cuotas' },
-    { path: 'alertas', icon: '🔔', label: 'Alertas' },
-    { path: '__menu', icon: '☰', label: 'Menú' }
+    { path: '', icon: 'home', label: 'Inicio' },
+    { path: 'vehiculos', icon: 'car', label: 'Vehículos' },
+    { path: 'economia', icon: 'chart', label: 'Economía' },
+    { path: 'alertas', icon: 'bell', label: 'Alertas' },
+    { path: '__menu', icon: 'menu', label: 'Menú' }
   ];
 
   // "☰ Menú" es un popover chico con solo las secciones que NO tienen
-  // botón propio en la barra inferior — para no duplicar Vehículos,
-  // Economía, Cuotas ni Alertas, que ya están ahí.
+  // botón propio en la barra inferior — para no duplicar Inicio, Vehículos,
+  // Economía ni Alertas, que ya están ahí.
   var MENU_POPOVER = [
-    { path: 'historial', icon: '📋', label: 'Historial' },
-    { path: 'contactos', icon: '👥', label: 'Clientes y proveedores' },
-    { path: 'ajustes', icon: '⚙️', label: 'Ajustes' }
+    { path: 'cuotas', icon: 'card', label: 'Cuotas y cobros' },
+    { path: 'historial', icon: 'clock', label: 'Historial' },
+    { path: 'contactos', icon: 'users', label: 'Clientes y proveedores' },
+    { path: 'ajustes', icon: 'settings', label: 'Ajustes' }
   ];
 
   // Rutas que ya no tienen ítem propio en el menú, pero se muestran como
@@ -43,7 +45,7 @@
     finanzas: 'economia', 'gastos-negocio': 'economia', cuotas: 'economia',
     resumenes: 'economia', comparacion: 'economia',
     papelera: 'ajustes', exportar: 'ajustes',
-    vehiculos: ''
+    vehiculo: 'vehiculos', 'vehiculo-nuevo': 'vehiculos', 'vehiculo-editar': 'vehiculos'
   };
 
   var appRoot, mainEl, sidebarEl, searchEl;
@@ -83,7 +85,7 @@
         class: 'bottomnav-menu-item', href: '#/' + n.path, dataset: { path: n.path },
         onclick: function (e) { closeMenu(); handleNavClick(e, n.path); }
       }, [
-        el('span', { class: 'bottomnav-menu-ico', text: n.icon }),
+        el('span', { class: 'bottomnav-menu-ico' }, ui.icon(n.icon)),
         el('span', { text: n.label })
       ]);
     }));
@@ -95,13 +97,27 @@
     return wrap;
   }
 
+  // Ícono cuadrado del riel. Usa la misma imagen que declara el HTML como
+  // ícono de la app (así la ruta es correcta en el código fuente y en cada
+  // bundle publicado); si no existe o no carga, cae al logo embebido.
+  function railMarkImg() {
+    var link = document.querySelector('link[rel="apple-touch-icon"]');
+    var img = el('img', { src: (link && link.href) || 'assets/logoiphonecarstyle.png?v=1', alt: 'Car Style Mercedes' });
+    img.addEventListener('error', function () {
+      if (img.classList.contains('is-wide')) return;
+      img.classList.add('is-wide');
+      img.src = App.assets.logo;
+    });
+    return img;
+  }
+
   function navItems() {
     var nodes = [];
     NAV.forEach(function (n) {
       if (n.path === 'ajustes') nodes.push(el('div', { class: 'nav-divider' }));
-      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, [
-        el('span', { class: 'nav-icon', text: n.icon }),
-        el('span', { class: 'nav-label', text: n.label }),
+      nodes.push(el('a', { class: 'nav-item', href: '#/' + n.path, title: n.label, dataset: { path: n.path }, onclick: function (e) { handleNavClick(e, n.path); } }, [
+        ui.icon(n.icon, 'nav-icon'),
+        el('span', { class: 'nav-label', text: n.short || n.label }),
         n.path === 'alertas' ? el('span', { class: 'nav-badge', id: 'alert-badge', hidden: true }) : null
       ]));
     });
@@ -114,13 +130,13 @@
     // Sidebar
     var online = App.auth && App.auth.enabled;
     sidebarEl = el('aside', { class: 'sidebar' }, [
-      el('div', { class: 'brand' }, [
-        el('img', { class: 'brand-logo-img', src: App.assets.logo, alt: 'Car Style Mercedes' })
+      el('div', { class: 'brand', title: 'Car Style Mercedes' }, [
+        el('span', { class: 'rail-mark' }, railMarkImg())
       ]),
       el('nav', { class: 'nav' }, navItems()),
       online ? el('div', { class: 'sidebar-user' }, [
-        el('span', { class: 'sidebar-user-name', text: (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || '' }),
-        el('button', { class: 'btn btn-sm btn-ghost', text: 'Salir', onclick: function () { App.auth.logout(); } })
+        el('span', { class: 'sidebar-user-name', title: (App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || '', text: ((App.auth.profile && (App.auth.profile.nombre || App.auth.profile.email)) || '?').charAt(0).toUpperCase() }),
+        el('button', { class: 'btn btn-sm btn-ghost rail-exit', text: 'Salir', onclick: function () { App.auth.logout(); } })
       ]) : null
     ]);
 
@@ -139,10 +155,10 @@
     searchEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { location.hash = '#/vehiculos'; } });
 
     var topbar = el('header', { class: 'topbar' }, [
-      el('button', { class: 'icon-btn menu-toggle', html: '☰', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }),
+      el('button', { class: 'icon-btn menu-toggle', 'aria-label': 'Menú', onclick: function () { document.body.classList.toggle('sidebar-open'); } }, ui.icon('menu')),
       el('img', { class: 'topbar-brand', src: App.assets.logo, alt: 'Car Style Mercedes' }),
       el('div', { class: 'topbar-search-wrap' }, searchEl),
-      el('button', { class: 'btn btn-primary btn-add-top', html: '<span>＋</span><span class="hide-sm">Vehículo</span>', 'aria-label': 'Registrar vehículo', onclick: function () { App.router.go('vehiculo-nuevo'); } })
+      el('button', { class: 'btn btn-primary btn-add-top', 'aria-label': 'Registrar vehículo', onclick: function () { App.router.go('vehiculo-nuevo'); } }, [ui.icon('plus'), el('span', { class: 'hide-sm', text: 'Vehículo' })])
     ]);
 
     var backdrop = el('div', { class: 'sidebar-backdrop', onclick: function () { document.body.classList.remove('sidebar-open'); } });
@@ -151,7 +167,7 @@
 
     var bottomnav = el('nav', { class: 'bottomnav' }, BOTTOM_NAV.map(function (n) {
       var kids = [
-        el('span', { class: 'bottomnav-ico', text: n.icon }),
+        el('span', { class: 'bottomnav-ico' }, ui.icon(n.icon)),
         el('span', { class: 'bottomnav-lbl', text: n.label }),
         n.path === 'alertas' ? el('span', { class: 'bottomnav-badge', id: 'bottomnav-alert-badge', hidden: true }) : null
       ];
@@ -216,7 +232,7 @@
     }
 
     // sync nav active (lateral + barra inferior)
-    var rawPath = (p.name === 'vehiculo') ? '' : p.name;
+    var rawPath = p.name;
     var activePath = SUBROUTE_OF.hasOwnProperty(rawPath) ? SUBROUTE_OF[rawPath] : rawPath;
     ui.qsa('.nav-item', sidebarEl).forEach(function (a) {
       a.classList.toggle('is-active', a.dataset.path === activePath);

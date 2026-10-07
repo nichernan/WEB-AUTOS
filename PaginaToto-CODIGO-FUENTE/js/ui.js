@@ -266,6 +266,76 @@
     return wrap;
   }
 
+  /* ------------- Íconos lineales (una sola familia, SVG inline) ---------- */
+  // Mismo trazo para toda la app (24×24, 1.75 de grosor, esquinas redondas).
+  // Se usa en navegación y en los módulos rediseñados; el color lo hereda del
+  // texto (currentColor).
+  var ICONS = {
+    home: '<path d="M3.5 11 12 3.8l8.5 7.2"/><path d="M5.5 9.8V20h13V9.8"/><path d="M10 20v-5.5h4V20"/>',
+    car: '<path d="M5 16.5H3.5v-5L5.6 7h12.8l2.1 4.5v5H19"/><circle cx="7.6" cy="16.6" r="1.9"/><circle cx="16.4" cy="16.6" r="1.9"/><path d="M9.5 16.6h5M3.5 11.5h17"/>',
+    chart: '<path d="M4 20V11M10 20V4M16 20v-6M2.5 20h19"/>',
+    users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M18 14.8c2 .7 3 2.4 3 5.2"/>',
+    bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>',
+    back: '<path d="m15 6-6 6 6 6"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+    alert: '<path d="M12 4 21.5 20h-19z"/><path d="M12 10v4.2M12 17.2v.3"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/>',
+    phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v3a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+    card: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
+    dollar: '<circle cx="12" cy="12" r="9"/><path d="M14.6 9.3c-.5-.9-1.4-1.3-2.6-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1 1.9-2.7 1.9-1.2 0-2.2-.5-2.7-1.5M12 6.5v1.5M12 16.3v1.4"/>',
+    file: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+    tag: '<path d="M3.5 12V4.5h7.5L20.5 14l-7 7z"/><circle cx="7.8" cy="8.3" r="1.2"/>',
+    receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+    bookmark: '<path d="M7 4h10v17l-5-4-5 4z"/>',
+    hourglass: '<path d="M7 3h10M7 21h10M8 3c0 5 4 6 4 9s-4 4-4 9M16 3c0 5-4 6-4 9s4 4 4 9"/>',
+    trend: '<path d="m3 17 6-6 4 4 8-8M15 7h6v6"/>',
+    activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M3 13h18"/>',
+    wrench: '<path d="M14.5 6.5a4 4 0 0 0 4.9 4.9L21 13l-8 8-3.5-3.5 8-8z"/><path d="M6 18l-2.5 2.5"/>',
+    list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+    filter: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+    dots: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+    cloud: '<path d="M7 18a4 4 0 0 1-.4-8A5.5 5.5 0 0 1 17.3 9 4.5 4.5 0 0 1 17 18z"/>',
+    save: '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
+    swap: '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
+    handshake: '<path d="M3 11l4-4 4 2 3-2 5 4-2 2M8 17l-3-3 2-2M11 20l-4-4M14 19l-3-3"/>',
+    message: '<path d="M4 5h16v11H10l-4 4v-4H4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'
+  };
+  function icon(name, cls) {
+    var w = el('span', { class: 'ico' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' });
+    w.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || ICONS.dots) + '</svg>';
+    return w;
+  }
+
+  /* ------------------------------ Tema (claro / oscuro / auto) ------------ */
+  // La preferencia se guarda en este navegador (clave propia, no toca los datos
+  // de la app). "auto" = sin atributo: el CSS sigue prefers-color-scheme del sistema.
+  var THEME_KEY = 'paginaToto:tema';
+  function themeGet() {
+    try { var t = localStorage.getItem(THEME_KEY); return (t === 'light' || t === 'dark') ? t : 'auto'; } catch (e) { return 'auto'; }
+  }
+  function themeApply(t) {
+    var root = document.documentElement;
+    if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
+  }
+  function themeSet(t) {
+    try { if (t === 'light' || t === 'dark') localStorage.setItem(THEME_KEY, t); else localStorage.removeItem(THEME_KEY); } catch (e) {}
+    themeApply(t);
+  }
+  themeApply(themeGet());
+  window.addEventListener('storage', function (e) { if (e.key === THEME_KEY) themeApply(themeGet()); });
+
   /* (gráficos y galería de fotos: eliminados) */
 
 
@@ -344,9 +414,10 @@
   });
 
   /* ------------------------------- Export ---------------------------- */
-  function emptyState(msg, icon) {
+  function emptyState(msg, ico) {
+    // si "ico" es el nombre de un ícono lineal se dibuja ese; si no, el emoji de siempre
     return el('div', { class: 'empty' }, [
-      el('div', { class: 'empty-icon', text: icon || '📭' }),
+      ICONS[ico] ? el('div', { class: 'empty-icon empty-icon-svg' }, icon(ico)) : el('div', { class: 'empty-icon', text: ico || '📭' }),
       el('p', { text: msg })
     ]);
   }
@@ -357,7 +428,8 @@
     toast: toast, modal: modal, confirm: confirm, closeAllModals: closeAllModals,
     field: field, input: input, textarea: textarea, select: select, money2: money2,
     moneyInput: moneyInput,
-    carIcon: carIcon,
+    carIcon: carIcon, icon: icon,
+    theme: { get: themeGet, set: themeSet },
     downloadFile: downloadFile, toCSV: toCSV,
     estadoBadge: estadoBadge, docBadge: docBadge, pill: pill, resultBadge: resultBadge,
     emptyState: emptyState
