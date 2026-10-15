@@ -2547,6 +2547,11 @@ a.w-row:hover { background: var(--c-sheet); }
 
 /* Riel: si el ícono cuadrado no carga, se muestra el logo horizontal embebido */
 @media (min-width: 761px) { .rail-mark img.is-wide { transform: none; object-fit: contain; padding: 0 4px; background: #000; } }
+
+.audit-item { margin: 10px 0; min-width: 0; }
+.audit-item > summary, .cfg-note > summary { cursor: pointer; font-weight: 650; }
+.audit-item pre, .cfg-note pre { max-width: 100%; max-height: 45vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; padding: 12px; border-radius: 8px; background: var(--c-surface-2); }
+.audit-row { border-top: 1px solid var(--c-border); margin-top: 12px; padding-top: 10px; min-width: 0; }
 </style>
 </head>
 <body>
@@ -2588,6 +2593,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       history: [],         // movimientos cronológicos { id, ts, fecha, tipo, vehicleId, titulo, detalle, monto, moneda, meta }
       reminders: [],       // recordatorios del calendario { id, titulo, fecha, hora, tipo, nota, repeat, doneDates, createdAt }
       fixedExpenses: [],   // gastos fijos del negocio { id, concepto, categoria, monto, moneda, cotizacionUSD, frecuencia, fecha, hasta, notas }
+      trash: [],            // elementos eliminados recuperables (independiente de la auditoría SQL)
       settings: {
         dolarActual: 1600,           // cotización actual (editable por el usuario, sólo para comparaciones)
         diasStockAlerta: 60,          // umbral de "muchos días en stock"
@@ -2599,6 +2605,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   var state = emptyState();
   var listeners = [];
+  var safetyBaseline = null;
 
   /* ----------------------------- Utilidades ------------------------------- */
   // id único sin depender de un contador compartido (importante para multi-usuario)
@@ -2609,6 +2616,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   function todayISO() {
     var d = new Date();
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function snapshotDayISO(date) {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date || new Date());
+    var p = {}; parts.forEach(function (x) { p[x.type] = x.value; });
+    return p.year + '-' + p.month + '-' + p.day;
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -2630,7 +2643,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       if (!raw) { state = emptyState(); save(); takeSnapshot(); return; }
       var parsed = JSON.parse(raw);
       state = migrate(parsed);
-      takeSnapshot();   // copia de seguridad interna (1 por día, últimas 5)
+      safetyBaseline = deepClone(state);
+      takeSnapshot();   // copia local diaria; las copias no se recortan por antigüedad
     } catch (err) {
       console.error('No se pudo cargar el estado, se inicia vacío:', err);
       state = emptyState();
@@ -2639,20 +2653,62 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   /* -------------------- Copias internas (anti "borré todo") ------------- */
   var SNAP_KEY = 'paginaToto:snapshots';
-  function takeSnapshot() {
+  function uniqueSnapshotTs(candidate, arr, data) {
+    arr = arr || JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+    var same = arr.filter(function (x) { return x.ts === candidate; })[0];
+    if (same && same.data === data) return candidate;
+    var max = arr.reduce(function (n, x) { return Math.max(n, Number(x.ts) || 0); }, 0);
+    candidate = Math.max(Number(candidate) || Date.now(), max + 1);
+    while (arr.some(function (x) { return x.ts === candidate; })) candidate++;
+    return candidate;
+  }
+  function takeSnapshot(label) {
     try {
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
-      var hoy = todayISO();
-      if (arr.length && arr[arr.length - 1].fecha === hoy) return;
-      arr.push({ ts: Date.now(), fecha: hoy, data: JSON.stringify(state) });
-      while (arr.length > 5) arr.shift();
+      var hoy = snapshotDayISO();
+      if (arr.some(function (x) { return x.etiqueta === (label || 'Estado completo') && x.fecha === hoy; })) return;
+      var data = JSON.stringify(state);
+      var snap = { ts: uniqueSnapshotTs(Date.now(), arr, data), fecha: hoy, etiqueta: label || 'Estado completo', data: data };
+      arr.push(snap);
       localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+      if (App.data && App.data.saveSnapshot) App.data.saveSnapshot(snap).catch(function (e) { console.warn('No se pudo guardar el punto de restauración remoto', e); });
     } catch (e) { /* si no entra en el almacenamiento, se ignora */ }
+  }
+  function createSnapshot(label, requireRemote) {
+    try {
+      var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+      var data = JSON.stringify(state);
+      var snap = { ts: uniqueSnapshotTs(Date.now(), arr, data), fecha: snapshotDayISO(), etiqueta: label || 'Estado completo', data: data };
+      arr.push(snap);
+      localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+      if (App.data && App.data.saveSnapshot) return App.data.saveSnapshot(snap).then(function () {
+        var log = App.data.logOperation ? App.data.logOperation('snapshot', 'estado_completo', summarizeState(state)) : Promise.resolve(false);
+        return Promise.resolve(log).then(function (logged) {
+          if (requireRemote && !logged) throw new Error('No se pudo registrar la creación del snapshot.');
+          return snap.ts;
+        });
+      }).catch(function (e) {
+        console.warn('Copia local creada; no pudo escribirse en Supabase', e);
+        if (requireRemote) throw e;
+        return snap.ts;
+      });
+      if (requireRemote) return Promise.reject(new Error('La capa de copias de Supabase todavía no está disponible.'));
+      return Promise.resolve(snap.ts);
+    } catch (e) { throw new Error('No hay espacio disponible para guardar una copia local.'); }
+  }
+  function cacheSnapshot(snap) {
+    var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+    var same = arr.filter(function (x) { return x.ts === snap.ts; })[0];
+    if (same && same.data === snap.data) return same.ts;
+    var copy = deepClone(snap);
+    copy.ts = uniqueSnapshotTs(copy.ts, arr, copy.data);
+    arr.push(copy); localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+    return copy.ts;
   }
   function getSnapshots() {
     try {
       return JSON.parse(localStorage.getItem(SNAP_KEY) || '[]')
-        .map(function (s) { return { ts: s.ts, fecha: s.fecha, autos: (JSON.parse(s.data).vehicles || []).length }; })
+        .map(function (s) { return { ts: s.ts, fecha: s.fecha, etiqueta: s.etiqueta || 'Estado completo', autos: (JSON.parse(s.data).vehicles || []).length }; })
         .sort(function (a, b) { return b.ts - a.ts; });
     } catch (e) { return []; }
   }
@@ -2661,10 +2717,19 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
       var s = arr.filter(function (x) { return x.ts === ts; })[0];
       if (!s) return false;
-      takeSnapshot();
-      state = migrate(JSON.parse(s.data));
-      emit();
-      return true;
+      var backup = createSnapshot('Estado anterior a restauración', requiresRemoteBackup());
+      var previousTrash = (state.trash || []).slice();
+      var targetState = migrate(JSON.parse(s.data));
+      return backup.then(function () {
+        var operation = App.data && App.data.logOperation ? App.data.logOperation('restauracion', 'snapshot', summarizeChange(state, targetState)) : Promise.resolve(false);
+        return Promise.resolve(operation).then(function (logged) {
+        if (requiresRemoteBackup() && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        state = targetState;
+        var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
+        previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
+        emit(); return true;
+        });
+      }).catch(function (e) { console.error('Restauración bloqueada porque no se guardó la copia previa', e); return false; });
     } catch (e) { return false; }
   }
   function markBackup() {
@@ -2679,6 +2744,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     // reemplaza la sincronización en sí.
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      safetyBaseline = deepClone(state);
     } catch (err) {
       console.error('No se pudo guardar el estado:', err);
       App.ui && App.ui.toast('No se guardaron los cambios en este dispositivo. Exportá una copia y liberá espacio.', 'error');
@@ -2690,9 +2756,11 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   // reemplaza el estado completo (usado por la sincronización con la nube). No guarda.
   function hydrate(newState) {
     state = migrate(newState || emptyState());
+    safetyBaseline = deepClone(state);
     listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
   function notify() {
+    safetyBaseline = deepClone(state);
     listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
 
@@ -2704,6 +2772,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     base.history = Array.isArray(parsed.history) ? parsed.history : [];
     base.reminders = Array.isArray(parsed.reminders) ? parsed.reminders : [];
     base.fixedExpenses = Array.isArray(parsed.fixedExpenses) ? parsed.fixedExpenses : [];
+    base.trash = Array.isArray(parsed.trash) ? parsed.trash : [];
     base.settings = Object.assign({}, base.settings, parsed.settings || {});
     base.meta = Object.assign({}, base.meta, parsed.meta || {});
     base.schema = SCHEMA_VERSION;
@@ -2802,7 +2871,37 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   /* ------------------------------ Listeners ------------------------------- */
   function subscribe(fn) { listeners.push(fn); return function () { listeners = listeners.filter(function (l) { return l !== fn; }); }; }
-  function emit() { save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } }); }
+  function remoteSafetyMissing() {
+    return !!(App.auth && App.auth.enabled && App.data && App.data.safetyAvailable && !App.data.safetyAvailable() && !(App.data.isOffline && App.data.isOffline()));
+  }
+  function deliveryGenerationMissing() {
+    return !!(App.auth && App.auth.enabled && App.data && App.data.deliveryReady && !App.data.deliveryReady());
+  }
+  function requiresRemoteBackup() {
+    return !!(App.auth && App.auth.enabled && !(App.data && App.data.isOffline && App.data.isOffline()));
+  }
+  function emit() {
+    if (remoteSafetyMissing() || deliveryGenerationMissing()) {
+      if (safetyBaseline) state = deepClone(safetyBaseline);
+      App.ui && App.ui.toast(deliveryGenerationMissing()
+        ? 'Cambios bloqueados hasta cargar la etapa comercial vigente desde Supabase.'
+        : 'Cambios bloqueados: aplicá primero la migración de auditoría y recuperación en Supabase.', 'error');
+      listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+      return;
+    }
+    save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+  }
+  function safetyReady(action) {
+    if (deliveryGenerationMissing()) {
+      App.ui && App.ui.toast('Esta acción queda bloqueada hasta cargar la etapa comercial vigente desde Supabase.', 'error');
+      return false;
+    }
+    if (remoteSafetyMissing()) {
+      App.ui && App.ui.toast('Esta acción está bloqueada hasta aplicar la migración SUPABASE/2-seguridad-y-recuperacion.sql.', 'error');
+      return false;
+    }
+    return true;
+  }
 
   /* --------------------------- Historial general ------------------------- */
   function logEvent(evt) {
@@ -2897,26 +2996,34 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function softDeleteVehicle(id) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(id);
     if (!v) return;
     v.deleted = true;
     v.deletedAt = Date.now();
+    addTrashEntry('vehicle', v.id, null, { vehicle: deepClone(v), history: deepClone(state.history.filter(function (h) { return h.vehicleId === id; })) }, 'Vehículo');
     logEvent({ tipo: 'papelera', vehicleId: v.id, titulo: 'Enviaste a papelera ' + vehicleName(v), detalle: 'El vehículo puede restaurarse desde la Papelera' });
     emit();
   }
 
   function restoreVehicle(id) {
+    if (!safetyReady('restaurar')) return;
     var v = getVehicle(id);
     if (!v) return;
     v.deleted = false;
     v.deletedAt = null;
+    markTrashRestored('vehicle', v.id);
     logEvent({ tipo: 'restaurar', vehicleId: v.id, titulo: 'Restauraste ' + vehicleName(v), detalle: 'El vehículo volvió al sistema' });
+    if (App.data && App.data.logOperation) App.data.logOperation('restauracion', 'vehicle', { entityId: id });
     emit();
   }
 
   function hardDeleteVehicle(id) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(id);
     if (!v) return;
+    var savedInTrash = (state.trash || []).some(function (x) { return x.entity === 'vehicle' && x.entityId === id && !x.restoredAt; });
+    if (!savedInTrash) addTrashEntry('vehicle', v.id, null, { vehicle: deepClone(v), history: deepClone(state.history.filter(function (h) { return h.vehicleId === id; })) }, 'Vehículo eliminado definitivamente');
     state.vehicles = state.vehicles.filter(function (x) { return x.id !== id; });
     // limpiar referencias de parte de pago (en ambos sentidos, para que ninguna
     // relación quede apuntando a un vehículo que ya no existe)
@@ -3230,8 +3337,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function removeExpense(vehicleId, expenseId) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(vehicleId);
     if (!v) return;
+    var removed = v.expenses.filter(function (x) { return x.id === expenseId; })[0];
+    if (!removed) return;
+    addTrashEntry('expense', removed.id, vehicleId, removed, 'Gasto de vehículo');
     v.expenses = v.expenses.filter(function (x) { return x.id !== expenseId; });
     v.updatedAt = Date.now();
     logEvent({ tipo: 'gasto', vehicleId: v.id, titulo: 'Eliminaste un gasto de ' + vehicleName(v), detalle: '' });
@@ -3266,6 +3377,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     return f;
   }
   function removeFixedExpense(id) {
+    if (!safetyReady('eliminar')) return;
+    var removed = getFixedExpense(id);
+    if (removed) addTrashEntry('fixed_expense', removed.id, null, removed, 'Gasto fijo');
     state.fixedExpenses = (state.fixedExpenses || []).filter(function (f) { return f.id !== id; });
     emit();
   }
@@ -3313,26 +3427,96 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     emit();
   }
   function removeReminder(id) {
+    if (!safetyReady('eliminar')) return;
+    var removed = getReminder(id);
+    if (removed) addTrashEntry('reminder', removed.id, null, removed, 'Recordatorio');
     state.reminders = (state.reminders || []).filter(function (r) { return r.id !== id; });
     emit();
+  }
+
+  function addTrashEntry(entity, entityId, parentId, data, label) {
+    if (!state.trash) state.trash = [];
+    state.trash.push({ id: uid('trash'), entity: entity, entityId: entityId, parentId: parentId,
+      label: label, deletedAt: Date.now(), deletedBy: App.auth && App.auth.profile ? App.auth.profile.id : null,
+      data: deepClone(data), restoredAt: null });
+  }
+  function markTrashRestored(entity, entityId) {
+    (state.trash || []).forEach(function (x) { if (x.entity === entity && x.entityId === entityId && !x.restoredAt) x.restoredAt = Date.now(); });
+  }
+  function getTrash() { return (state.trash || []).slice().filter(function (x) { return !x.restoredAt; }).sort(function (a, b) { return b.deletedAt - a.deletedAt; }); }
+  function allTrash() { return (state.trash || []).slice().sort(function (a, b) { return b.deletedAt - a.deletedAt; }); }
+  function restoreTrash(id) {
+    if (!safetyReady('restaurar')) return false;
+    var item = (state.trash || []).filter(function (x) { return x.id === id && !x.restoredAt; })[0];
+    if (!item) return false;
+    var now = Date.now();
+    if (item.entity === 'vehicle') {
+      var saved = item.data && item.data.vehicle ? item.data : { vehicle: item.data, history: [] };
+      var existing = getVehicle(item.entityId);
+      if (existing) { existing.deleted = false; existing.deletedAt = null; }
+      else { var restoredVehicle = deepClone(saved.vehicle); restoredVehicle.deleted = false; restoredVehicle.deletedAt = null; state.vehicles.push(restoredVehicle); }
+      (saved.history || []).forEach(function (h) { if (!getEvent(h.id)) state.history.push(h); });
+    } else if (item.entity === 'expense') {
+      var parent = getVehicle(item.parentId); if (!parent) return false;
+      if (!parent.expenses.some(function (x) { return x.id === item.entityId; })) parent.expenses.push(item.data);
+    } else if (item.entity === 'fixed_expense') {
+      if (!getFixedExpense(item.entityId)) state.fixedExpenses.push(item.data);
+    } else if (item.entity === 'reminder') {
+      if (!getReminder(item.entityId)) state.reminders.push(item.data);
+    } else return false;
+    item.restoredAt = now;
+    if (App.data && App.data.logOperation) App.data.logOperation('restauracion', item.entity, { trashId: item.id, entityId: item.entityId });
+    emit(); return true;
   }
 
   /* ------------------------- Import / Export / Reset ------------------- */
   function exportJSON() { return JSON.stringify(state, null, 2); }
   function importJSON(text) {
     var parsed = JSON.parse(text);
-    takeSnapshot();
-    state = migrate(parsed);
-    emit();
+    var imported = migrate(parsed);
+    var requireRemote = requiresRemoteBackup();
+    return createSnapshot('Estado anterior a importación', requireRemote).then(function () {
+      var operation = App.data && App.data.logOperation ? App.data.logOperation('importacion', 'estado_completo', summarizeChange(state, imported)) : Promise.resolve(false);
+      return Promise.resolve(operation).then(function (logged) {
+      if (requireRemote && !logged) throw new Error('No se pudo registrar la importación; no se reemplazaron los datos.');
+      var previousTrash = (state.trash || []).slice();
+      state = imported;
+      var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
+      previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
+      emit();
+      });
+    });
   }
   function resetAll() {
-    takeSnapshot();
-    state = emptyState();
-    emit();
+    var requireRemote = requiresRemoteBackup();
+    return createSnapshot('Estado anterior a reset', requireRemote).then(function () {
+      var operation = App.data && App.data.logOperation ? App.data.logOperation('reinicio', 'estado_completo', summarizeChange(state, emptyState())) : Promise.resolve(false);
+      return Promise.resolve(operation).then(function (logged) {
+      if (requireRemote && !logged) throw new Error('No se pudo registrar el reinicio; no se reemplazaron los datos.');
+      var previousTrash = (state.trash || []).slice();
+      state = emptyState();
+      state.trash = previousTrash;
+      emit();
+      });
+    });
   }
 
   /* ------------------------------- Getters ----------------------------- */
   function getState() { return state; }
+  function summarizeState(s) { return { vehicles: (s.vehicles || []).length, history: (s.history || []).length, reminders: (s.reminders || []).length, fixed_expenses: (s.fixedExpenses || []).length }; }
+  function summarizeChange(before, after) {
+    var result = { before: summarizeState(before), after: summarizeState(after), changes: {} };
+    [['vehicles','vehicles'],['history','history'],['reminders','reminders'],['fixed_expenses','fixedExpenses']].forEach(function (p) {
+      var old = {}, cur = {};
+      (before[p[1]] || []).forEach(function (x) { old[x.id] = x; });
+      (after[p[1]] || []).forEach(function (x) { cur[x.id] = x; });
+      var insert = 0, update = 0, del = 0;
+      Object.keys(cur).forEach(function (id) { if (!old[id]) insert++; else if (JSON.stringify(old[id]) !== JSON.stringify(cur[id])) update++; });
+      Object.keys(old).forEach(function (id) { if (!cur[id]) del++; });
+      result.changes[p[0]] = { INSERT: insert, UPDATE: update, DELETE: del };
+    });
+    return result;
+  }
   function getVehicle(id) { return state.vehicles.filter(function (v) { return v.id === id; })[0] || null; }
   function activeVehicles() { return state.vehicles.filter(function (v) { return !v.deleted; }); }
   function trashedVehicles() { return state.vehicles.filter(function (v) { return v.deleted; }); }
@@ -3387,6 +3571,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     getState: getState, getVehicle: getVehicle,
     activeVehicles: activeVehicles, trashedVehicles: trashedVehicles,
     getHistory: getHistory, getEvent: getEvent,
+    getTrash: getTrash, allTrash: allTrash, restoreTrash: restoreTrash,
     createVehicle: createVehicle, updateVehicle: updateVehicle,
     softDeleteVehicle: softDeleteVehicle, restoreVehicle: restoreVehicle, hardDeleteVehicle: hardDeleteVehicle,
     setPurchase: setPurchase, pagarCuota: pagarCuota, desmarcarCuota: desmarcarCuota,
@@ -3400,7 +3585,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     updateReminder: updateReminder, toggleReminderOccurrence: toggleReminderOccurrence, removeReminder: removeReminder,
     updateSettings: updateSettings,
     exportJSON: exportJSON, importJSON: importJSON, resetAll: resetAll,
-    markBackup: markBackup, takeSnapshot: takeSnapshot, getSnapshots: getSnapshots, restoreSnapshot: restoreSnapshot,
+    markBackup: markBackup, takeSnapshot: takeSnapshot, createSnapshot: createSnapshot, cacheSnapshot: cacheSnapshot, getSnapshots: getSnapshots, restoreSnapshot: restoreSnapshot,
     logEvent: function (e) { logEvent(e); emit(); },
     // helpers
     uid: uid, todayISO: todayISO, num: num,
@@ -5669,28 +5854,79 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var ARR = { vehicles: 'vehicles', history: 'history', reminders: 'reminders', fixed_expenses: 'fixedExpenses' };
   var pendingMigration = null;
   var BASE_KEY = 'paginaToto:syncBase';
+  var GENERATION_KEY = 'paginaToto:businessGeneration';
+  var businessGeneration = null;
+  var generationReady = false;
+  var deliveryLabel = null;
+  var deliveryEstablishedAt = null;
   var offlineMode = false;
   var reconnecting = false;
   var channel = null;
+  var safetyAvailable = false;
+  var deletionApprovalPending = false;
+  var approvedMassChangeFingerprint = null;
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function j(o) { return JSON.stringify(o); }
+  function businessDateKey(value) {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value || new Date());
+    var p = {}; parts.forEach(function (x) { p[x.type] = x.value; });
+    return p.year + '-' + p.month + '-' + p.day;
+  }
 
   /* ------------------------------- carga ------------------------------ */
+  function probeSafety() {
+    return Promise.all(['audit_log','app_snapshots','app_trash','app_operations','app_delivery_state'].map(function (t) {
+      return sb.from(t).select('*').limit(0);
+    })).then(function (rs) {
+      safetyAvailable = rs.every(function (r) { return !r.error; });
+      if (!safetyAvailable) console.warn('Auditoría/papelera/snapshots remotos requieren aplicar SUPABASE/2-seguridad-y-recuperacion.sql.');
+    }).catch(function () { safetyAvailable = false; });
+  }
+
   function loadAll() {
-    return Promise.all([
+    return probeSafety().then(function () {
+      return sb.from('app_delivery_state').select('generation,label,established_at').eq('singleton', true).maybeSingle();
+    }).then(function (r) {
+      if (r.error) throw r.error;
+      if (!r.data || !r.data.generation) {
+        generationReady = false;
+        throw new Error('No existe una etapa comercial activa; la sincronización quedó bloqueada.');
+      }
+      var previousGeneration = null;
+      try { previousGeneration = localStorage.getItem(GENERATION_KEY); } catch (e) {}
+      businessGeneration = r.data.generation;
+      deliveryLabel = r.data.label || null;
+      deliveryEstablishedAt = r.data.established_at ? new Date(r.data.established_at).getTime() : null;
+      generationReady = true;
+      if (previousGeneration !== businessGeneration) {
+        // Solo se descartan datos/cachés comerciales. Auth y preferencias quedan intactos.
+        try {
+          localStorage.removeItem(store.STORAGE_KEY);
+          localStorage.removeItem(BASE_KEY);
+          localStorage.removeItem('paginaToto:snapshots');
+          localStorage.setItem(GENERATION_KEY, businessGeneration);
+        } catch (e) { throw new Error('No se pudo invalidar el estado comercial local anterior.'); }
+      }
+      return Promise.all([
       sb.from('vehicles').select('data'),
       sb.from('history').select('data'),
       sb.from('reminders').select('data'),
       sb.from('fixed_expenses').select('data'),
-      sb.from('kv').select('k,data')
-    ]).then(function (res) {
+      sb.from('kv').select('k,data'),
+      safetyAvailable ? sb.from('app_trash').select('*') : Promise.resolve({ data: [], error: null })
+    ]);
+    }).then(function (res) {
       res.forEach(function (r) { if (r.error) throw r.error; });
       var st = store.blankState();
-      st.vehicles = (res[0].data || []).map(function (r) { return r.data; });
-      st.history = (res[1].data || []).map(function (r) { return r.data; });
-      st.reminders = (res[2].data || []).map(function (r) { return r.data; });
-      st.fixedExpenses = (res[3].data || []).map(function (r) { return r.data; });
+      st.vehicles = (res[0].data || []).map(function (r) { return fromCloudData(r.data); });
+      st.history = (res[1].data || []).map(function (r) { return fromCloudData(r.data); });
+      st.reminders = (res[2].data || []).map(function (r) { return fromCloudData(r.data); });
+      st.fixedExpenses = (res[3].data || []).map(function (r) { return fromCloudData(r.data); });
+      st.trash = (res[5].data || []).map(function (r) { return { id: r.id, entity: r.entity, entityId: r.entity_id, parentId: r.parent_id,
+        label: r.label, data: r.data, deletedAt: new Date(r.deleted_at).getTime(), deletedBy: r.deleted_by,
+        restoredAt: r.restored_at ? new Date(r.restored_at).getTime() : null }; });
       (res[4].data || []).forEach(function (r) {
         if (r.k === 'settings') st.settings = Object.assign(st.settings, r.data || {});
         if (r.k === 'meta') st.meta = Object.assign(st.meta, r.data || {});
@@ -5700,21 +5936,44 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var cloudState = clone(st);
       var local = null;
       try { local = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null'); } catch (e) {}
+      if (local && Array.isArray(local.trash)) {
+        var remoteTrash = {}; (st.trash || []).forEach(function (x) { remoteTrash[x.id] = x; });
+        local.trash.forEach(function (x) {
+          var current = remoteTrash[x.id];
+          if (!current) { st.trash.push(x); remoteTrash[x.id] = x; }
+          else if (!current.restoredAt && x.restoredAt) { current.restoredAt = x.restoredAt; }
+        });
+      }
       if (offlineMode && local) st = mergeOfflineChanges(remote, local);
 
-      var vacio = !remote.vehicles.length && !remote.history.length && !remote.reminders.length && !remote.fixedExpenses.length;
-      if (vacio && local && (local.vehicles || []).length) pendingMigration = local;
+      // Nunca importar automáticamente localStorage hacia una etapa ya inicializada.
+      pendingMigration = null;
 
       applyingRemote = true;
       try { store.hydrate(st); } finally { applyingRemote = false; }
       shadow = clone(cloudState);
       if (!offlineMode || !local) saveBase(cloudState);
-      if (offlineMode && local) {
+      if (offlineMode) {
         offlineMode = false;
-        flush(store.getState());
+        if (local) flush(store.getState());
       }
+      if (safetyAvailable) flush(store.getState());
       subscribe();
     });
+  }
+
+  function fromCloudData(data) {
+    if (!data || data._delivery_generation !== businessGeneration) {
+      throw new Error('Supabase devolvió un registro de otra etapa comercial.');
+    }
+    var clean = clone(data);
+    delete clean._delivery_generation;
+    return clean;
+  }
+  function toCloudData(data) {
+    var tagged = clone(data);
+    tagged._delivery_generation = businessGeneration;
+    return tagged;
   }
 
   /* ----------------------------- tiempo real -------------------------- */
@@ -5725,6 +5984,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     TABLES.concat(['kv']).forEach(function (t) {
       ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, function (payload) { onRemote(t, payload); });
     });
+    if (safetyAvailable) ch.on('postgres_changes', { event: '*', schema: 'public', table: 'app_trash' }, function (payload) { onRemote('app_trash', payload); });
     ch.subscribe();
   }
 
@@ -5732,7 +5992,19 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     var st = store.getState();
     applyingRemote = true;
     try {
-      if (table === 'kv') {
+      if (table === 'app_trash') {
+        var rows = st.trash || (st.trash = []), row = payload.new || payload.old;
+        if (row.generation && row.generation !== businessGeneration) return;
+        var idx = rows.findIndex(function (x) { return x.id === row.id; });
+        if (payload.eventType === 'DELETE') { if (idx >= 0) rows.splice(idx, 1); }
+        else {
+          var item = { id: row.id, entity: row.entity, entityId: row.entity_id, parentId: row.parent_id, label: row.label,
+            data: row.data, deletedAt: new Date(row.deleted_at).getTime(), deletedBy: row.deleted_by,
+            restoredAt: row.restored_at ? new Date(row.restored_at).getTime() : null };
+          if (idx >= 0) rows[idx] = item; else rows.push(item);
+        }
+      } else if (table === 'kv') {
+        if (payload.new && payload.new.generation !== businessGeneration) return;
         if (payload.eventType === 'DELETE') return;
         var kk = payload.new.k;
         if (kk === 'settings') st.settings = Object.assign({}, st.settings, payload.new.data);
@@ -5744,7 +6016,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
           var i = -1; arr.forEach(function (x, k) { if (x.id === oid) i = k; });
           if (i >= 0) arr.splice(i, 1);
         } else {
-          var d = payload.new.data;
+          if (!payload.new.data || payload.new.data._delivery_generation !== businessGeneration) return;
+          var d = fromCloudData(payload.new.data);
           var jx = -1; arr.forEach(function (x, k) { if (x.id === d.id) jx = k; });
           if (jx >= 0) arr[jx] = d; else arr.push(d);
         }
@@ -5767,47 +6040,109 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function diffArr(table, cur, old, ops, tsField) {
+    var metric = ops.metrics[table] || (ops.metrics[table] = { insert: 0, update: 0, delete: 0 });
     var oldById = {}; (old || []).forEach(function (x) { oldById[x.id] = x; });
     var curIds = {};
     (cur || []).forEach(function (x) {
       curIds[x.id] = true;
       var prev = oldById[x.id];
       if (!prev || j(prev) !== j(x)) {
-        var row = { id: x.id, data: x };
+        if (prev) metric.update++; else metric.insert++;
+        var row = { id: x.id, data: toCloudData(x) };
         if (tsField) row.ts = x[tsField] || 0;
         ops.up[table].push(row);
       }
     });
-    (old || []).forEach(function (x) { if (!curIds[x.id]) ops.del[table].push(x.id); });
+    (old || []).forEach(function (x) { if (!curIds[x.id]) { ops.del[table].push(x.id); metric.delete++; } });
   }
 
   function flush(state) {
     if (!navigator.onLine) { offlineMode = true; return Promise.resolve(false); }
+    if (!generationReady || !businessGeneration) return Promise.resolve(false);
     if (!shadow) shadow = clone(state);
-    var ops = { up: { vehicles: [], history: [], reminders: [], fixed_expenses: [], kv: [] },
+    var ops = { up: { vehicles: [], history: [], reminders: [], fixed_expenses: [], kv: [] }, metrics: {},
                 del: { vehicles: [], history: [], reminders: [], fixed_expenses: [], kv: [] } };
     diffArr('vehicles', state.vehicles, shadow.vehicles, ops);
     diffArr('history', state.history, shadow.history, ops, 'ts');
     diffArr('reminders', state.reminders, shadow.reminders, ops);
     diffArr('fixed_expenses', state.fixedExpenses, shadow.fixedExpenses, ops);
-    if (j(state.settings) !== j(shadow.settings)) ops.up.kv.push({ k: 'settings', data: state.settings });
-    if (j(state.meta) !== j(shadow.meta)) ops.up.kv.push({ k: 'meta', data: state.meta });
+    if (j(state.settings) !== j(shadow.settings)) ops.up.kv.push({ k: 'settings', data: state.settings, generation: businessGeneration });
+    if (j(state.meta) !== j(shadow.meta)) ops.up.kv.push({ k: 'meta', data: state.meta, generation: businessGeneration });
 
+    var riskByTable = [];
+    ['vehicles','history','reminders','fixed_expenses'].forEach(function (t) {
+      var previous = t === 'vehicles' ? shadow.vehicles.length : t === 'history' ? shadow.history.length :
+        t === 'reminders' ? shadow.reminders.length : shadow.fixedExpenses.length;
+      var metric = ops.metrics[t] || { insert: 0, update: 0, delete: 0 };
+      var threshold = previous <= 3 ? Math.max(1, previous) : Math.max(3, Math.ceil(previous * 0.5));
+      if (metric.delete > 0 && ((previous <= 3 && metric.delete === previous) || (previous > 3 && metric.delete >= threshold))) {
+        riskByTable.push({ table: t, action: 'DELETE', count: metric.delete, ids: ops.del[t].slice().sort() });
+      }
+      var upsertCount = metric.insert + metric.update;
+      var broadUpsert = previous <= 3
+        ? ((previous > 0 && metric.update >= previous) || metric.insert >= 3)
+        : upsertCount >= threshold;
+      if (upsertCount > 0 && broadUpsert) {
+        riskByTable.push({ table: t, action: 'UPSERT', count: upsertCount, ids: ops.up[t].map(function (x) { return x.id; }).sort() });
+      }
+    });
+    var fingerprint = riskByTable.map(function (x) { return x.table + ':' + x.action + ':' + x.ids.join(','); }).join('|');
+    var risky = riskByTable.length > 0;
+    if (risky && deletionApprovalPending) return Promise.resolve(false);
+    if (risky && approvedMassChangeFingerprint !== fingerprint && !deletionApprovalPending) {
+      if (!App.ui || !App.ui.confirm) return Promise.resolve(false);
+      deletionApprovalPending = true;
+      return App.ui.confirm({ title: 'Cambios grandes de sincronización',
+        message: 'La sincronización intenta realizar cambios grandes: ' + riskByTable.map(function (x) { return x.action + ' ' + x.count + ' en ' + x.table; }).join(', ') +
+          '. Se bloqueará hasta que confirmes que estos cambios son intencionales.', danger: true, confirmText: 'Confirmar sincronización' })
+        .then(function (ok) {
+          deletionApprovalPending = false;
+          if (!ok) { approvedMassChangeFingerprint = null; App.ui.toast('Sincronización detenida; los datos remotos siguen intactos.', 'error'); return false; }
+          return saveSnapshotState(shadow, 'Estado anterior a operación masiva', 'safety').then(function () {
+            var details = { tables: {} };
+            riskByTable.forEach(function (risk) {
+              var m = ops.metrics[risk.table] || { insert: 0, update: 0, delete: 0 };
+              details.tables[risk.table] = { INSERT: m.insert, UPDATE: m.update, DELETE: m.delete };
+            });
+            return logOperation('operacion_masiva', 'sincronizacion', details);
+          }).then(function (logged) {
+            if (!logged) throw new Error('No se pudo registrar la operación masiva.');
+            approvedMassChangeFingerprint = fingerprint;
+            return flush(state);
+          }).catch(function (e) {
+            approvedMassChangeFingerprint = null;
+            console.error('Se bloqueó la operación masiva porque no se pudo respaldar o registrar', e);
+            App.ui && App.ui.toast('Operación masiva bloqueada: no se pudo guardar el backup remoto previo.', 'error');
+            return false;
+          });
+        });
+    }
+    if (approvedMassChangeFingerprint === fingerprint) approvedMassChangeFingerprint = null;
+    deletionApprovalPending = false;
     var promises = [];
     Object.keys(ops.up).forEach(function (t) {
       var key = t === 'kv' ? 'k' : 'id';
       if (ops.up[t].length) promises.push(sb.from(t).upsert(ops.up[t], { onConflict: key }));
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
-    if (!promises.length) { shadow = clone(state); return Promise.resolve(true); }
+    if (!promises.length) {
+      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
+        console.error('sync safety flush', e); offlineMode = true;
+        App.ui && App.ui.toast('No se pudo guardar la papelera en la nube. Revisá internet.', 'error');
+        if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(reconnect, 8000);
+        return false;
+      });
+    }
 
     return Promise.all(promises).then(function (results) {
       var bad = null;
       results.forEach(function (r) { if (r && r.error) bad = r.error; });
       if (bad) throw bad;
+      return syncTrash(state.trash || [], shadow.trash || []);
+    }).then(function () {
       shadow = clone(state);
       saveBase(state);
-      return true;
+      return ensureCloudDailySnapshot(state).then(function () { return true; });
     }).catch(function (e) {
       console.error('sync flush', e);
       offlineMode = true;
@@ -5816,6 +6151,90 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       if (pushTimer) clearTimeout(pushTimer);
       pushTimer = setTimeout(reconnect, 8000);
       return false;
+    });
+  }
+
+  function syncTrash(cur, old) {
+    if (!safetyAvailable) return Promise.resolve();
+    var oldById = {}; (old || []).forEach(function (x) { oldById[x.id] = x; });
+    var tasks = [];
+    (cur || []).forEach(function (x) {
+      var before = oldById[x.id];
+      if (!before) tasks.push(sb.from('app_trash').insert({ id: x.id, entity: x.entity, entity_id: x.entityId,
+        parent_id: x.parentId || null, label: x.label || x.entity, data: x.data, deleted_at: new Date(x.deletedAt).toISOString(),
+        deleted_by: x.deletedBy || null, restored_at: x.restoredAt ? new Date(x.restoredAt).toISOString() : null,
+        generation: businessGeneration }));
+      else if (!before.restoredAt && x.restoredAt) tasks.push(sb.from('app_trash').update({ restored_at: new Date(x.restoredAt).toISOString() }).eq('id', x.id));
+    });
+    return Promise.all(tasks).then(function (rs) { var bad = rs.filter(function (x) { return x.error; })[0]; if (bad) throw bad.error; });
+  }
+
+  function snapshotSummary(state) {
+    return { vehicles: (state.vehicles || []).length, history: (state.history || []).length,
+      reminders: (state.reminders || []).length, fixed_expenses: (state.fixedExpenses || []).length };
+  }
+  function saveSnapshot(snap) {
+    if (!safetyAvailable) return Promise.reject(new Error('Migración de seguridad pendiente.'));
+    if (!generationReady || !businessGeneration) return Promise.reject(new Error('No hay una etapa comercial activa.'));
+    var uid = App.auth && App.auth.profile && App.auth.profile.id;
+    var state = JSON.parse(snap.data);
+    var source = snap.source || 'application';
+    var payload = { created_at: new Date(snap.ts).toISOString(), label: snap.etiqueta || 'Estado completo',
+      created_by: uid || null, state: state, summary: snapshotSummary(state), source: source, generation: businessGeneration };
+    return sb.from('app_snapshots').insert(payload).then(function (r) {
+      if (r.error && source === 'daily' && (r.error.code === '23505' || /duplicate key/i.test(r.error.message || ''))) return true;
+      if (r.error) throw r.error;
+      return true;
+    });
+  }
+  function saveSnapshotState(state, label, source) {
+    var when = Date.now();
+    return saveSnapshot({ ts: when, etiqueta: label, source: source || 'application',
+      data: JSON.stringify(state) });
+  }
+  function fetchSnapshots(offset) {
+    if (!safetyAvailable) return Promise.reject(new Error('Aplicá primero la migración SQL de seguridad.'));
+    offset = Math.max(0, Number(offset) || 0);
+    return sb.from('app_snapshots').select('id,created_at,label,created_by,summary,source,snapshot_day').eq('generation', businessGeneration).order('created_at', { ascending: false }).range(offset, offset + 99)
+      .then(function (r) { if (r.error) throw r.error; return r.data || []; });
+  }
+  function fetchSnapshotDetails(id) {
+    return sb.from('app_snapshots').select('id,created_at,label,created_by,state').eq('id', id).eq('generation', businessGeneration).single()
+      .then(function (r) { if (r.error) throw r.error; return r.data; });
+  }
+  function ensureCloudDailySnapshot(state) {
+    if (!safetyAvailable) return Promise.resolve(false);
+    var day = businessDateKey(new Date());
+    return sb.from('app_snapshots').select('id').eq('source', 'daily').eq('snapshot_day', day).limit(1)
+      .then(function (r) {
+        if (r.error) throw r.error;
+        if (r.data && r.data.length) return false;
+        return saveSnapshotState(state, 'Estado diario', 'daily').then(function () { return true; });
+      }).then(function (created) { if (created) console.info('Punto diario de restauración creado.'); return created; });
+  }
+  function fetchAudit(offset, operationOffset) {
+    if (!safetyAvailable) return Promise.reject(new Error('Aplicá primero la migración SQL de seguridad.'));
+    offset = Math.max(0, Number(offset) || 0);
+    operationOffset = Math.max(0, Number(operationOffset) || 0);
+    var end = offset + 499;
+    var operationEnd = operationOffset + 499;
+    return Promise.all([
+      sb.from('audit_log').select('id,occurred_at,table_name,operation,record_id,before_data,after_data,actor_uid,db_role,transaction_id').order('id', { ascending: false }).range(offset, end),
+      sb.from('app_operations').select('id,occurred_at,actor_uid,action,entity,details').eq('generation', businessGeneration).order('occurred_at', { ascending: false }).order('id', { ascending: false }).range(operationOffset, operationEnd),
+      offset === 0 ? sb.from('profiles').select('id,nombre,email') : Promise.resolve({ data: [], error: null })
+    ]).then(function (rs) { rs.forEach(function (r) { if (r.error) throw r.error; }); return { rows: rs[0].data || [], operations: rs[1].data || [], profiles: rs[2].data || [] }; });
+  }
+  function logOperation(action, entity, details) {
+    if (!safetyAvailable || !generationReady || !businessGeneration) return Promise.resolve(false);
+    return sb.from('app_operations').insert({ actor_uid: App.auth && App.auth.profile ? App.auth.profile.id : null,
+      action: action, entity: entity, details: details || {}, generation: businessGeneration }).then(function (r) { if (r.error) throw r.error; return true; })
+      .catch(function (e) { console.error('No se pudo registrar la operación de aplicación', e); return false; });
+  }
+  function restoreRemoteSnapshot(id) {
+    return fetchSnapshotDetails(id).then(function (row) {
+      var ts = new Date(row.created_at).getTime();
+      var restoreTs = store.cacheSnapshot({ ts: ts, fecha: businessDateKey(new Date(ts)), etiqueta: row.label, data: JSON.stringify(row.state) });
+      return Promise.resolve(store.restoreSnapshot(restoreTs)).then(function (done) { if (!done) throw new Error('No se pudo guardar la copia previa o restaurar el estado.'); return true; });
     });
   }
 
@@ -5831,7 +6250,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     if (!base) base = store.blankState();
     var pairs = [
       ['vehicles', base.vehicles, local.vehicles], ['history', base.history, local.history],
-      ['reminders', base.reminders, local.reminders], ['fixedExpenses', base.fixedExpenses, local.fixedExpenses]
+      ['reminders', base.reminders, local.reminders], ['fixedExpenses', base.fixedExpenses, local.fixedExpenses], ['trash', base.trash, local.trash]
     ];
     pairs.forEach(function (pair) {
       var key = pair[0], before = {}, after = {}, byId = {};
@@ -5941,7 +6360,22 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   App.data = {
     loadAll: loadAll,
     loadLocal: function () {
-      store.load();
+      var localGeneration = null;
+      try { localGeneration = localStorage.getItem(GENERATION_KEY); } catch (e) {}
+      if (!localGeneration) {
+        try {
+          localStorage.removeItem(store.STORAGE_KEY);
+          localStorage.removeItem(BASE_KEY);
+          localStorage.removeItem('paginaToto:snapshots');
+        } catch (e) {}
+        generationReady = false;
+        store.hydrate(store.blankState());
+        App.ui && App.ui.toast('Estado local anterior descartado. Conectate para cargar la etapa comercial vigente.', 'error');
+      } else {
+        businessGeneration = localGeneration;
+        generationReady = true;
+        store.load();
+      }
       offlineMode = true;
       shadow = clone(store.getState());
       return Promise.resolve(store.getState());
@@ -5950,7 +6384,19 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     flushNow: function () { if (pushTimer) clearTimeout(pushTimer); return flush(store.getState()); },
     pendingMigrationInfo: pendingMigrationInfo,
     doMigration: doMigration,
-    skipMigration: skipMigration
+    skipMigration: skipMigration,
+    safetyAvailable: function () { return safetyAvailable; },
+    deliveryReady: function () { return generationReady && !!businessGeneration; },
+    deliveryLabel: function () { return deliveryLabel; },
+    deliveryEstablishedAt: function () { return deliveryEstablishedAt; },
+    isOffline: function () { return offlineMode; },
+    businessDateKey: businessDateKey,
+    fetchAudit: fetchAudit,
+    fetchSnapshots: fetchSnapshots,
+    fetchSnapshotDetails: fetchSnapshotDetails,
+    saveSnapshot: saveSnapshot,
+    restoreRemoteSnapshot: restoreRemoteSnapshot,
+    logOperation: logOperation
   };
 })();
 </script>
@@ -9594,21 +10040,23 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   /* ============================== PAPELERA ========================= */
   function papeleraView(root) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Papelera', 'Vehículos eliminados. Podés restaurarlos o borrarlos definitivamente.'));
-    var list = store.trashedVehicles();
+    wrap.appendChild(pageHead('Papelera', 'Elementos eliminados. Podés consultar sus datos originales y restaurarlos.'));
+    var list = store.getTrash();
     if (!list.length) { wrap.appendChild(ui.emptyState('La papelera está vacía.', '🗑️')); root.appendChild(wrap); return; }
-    list.forEach(function (v) {
+    list.forEach(function (item) {
+      var vehicle = item.entity === 'vehicle' ? (item.data.vehicle || item.data) : null;
+      var title = vehicle ? store.vehicleName(vehicle) : item.label;
       wrap.appendChild(el('div', { class: 'card trash-item' }, [
         el('div', { class: 'trash-info' }, [
-          el('strong', { text: store.vehicleName(v) }),
-          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(isoOf(new Date(v.deletedAt))) })
+          el('strong', { text: title }),
+          el('span', { class: 'muted', text: (item.entityId || '') + ' · eliminado ' + fmt.datetime(item.deletedAt) + (item.deletedBy ? ' · usuario ' + item.deletedBy : '') })
         ]),
         el('div', { class: 'row-btns' }, [
-          el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () { store.restoreVehicle(v.id); ui.toast('Vehículo restaurado', 'success'); App.router.render(); } }),
-          el('button', { class: 'btn btn-sm btn-danger', text: 'Eliminar definitivamente', onclick: function () {
-            ui.confirm({ title: 'Eliminar definitivamente', message: 'Esta acción no se puede deshacer. ¿Eliminar "' + store.vehicleName(v) + '" para siempre?', danger: true, confirmText: 'Eliminar para siempre' })
-              .then(function (ok) { if (ok) { store.hardDeleteVehicle(v.id); ui.toast('Vehículo eliminado'); App.router.render(); } });
-          } })
+          el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () {
+            if (store.restoreTrash(item.id)) { ui.toast('Elemento restaurado', 'success'); App.router.render(); }
+            else ui.toast('No se pudo restaurar; puede faltar el elemento relacionado.', 'error');
+          } }),
+          el('details', { class: 'cfg-note' }, [el('summary', { text: 'Ver datos originales' }), el('pre', { text: JSON.stringify(item.data, null, 2) })])
         ])
       ]));
     });
@@ -9733,8 +10181,19 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
         var f = inp.files[0]; if (!f) return;
         var r = new FileReader();
         r.onload = function () {
-          try { store.importJSON(r.result); ui.toast('Datos importados', 'success'); App.router.render(); }
-          catch (e) { ui.toast('Archivo inválido', 'error'); }
+          try {
+            var preview = JSON.parse(r.result);
+            var counts = { vehicles: (preview.vehicles || []).length, history: (preview.history || []).length,
+              reminders: (preview.reminders || []).length, fixed_expenses: (preview.fixedExpenses || []).length };
+            ui.confirm({ title: 'Importar copia JSON', message: 'Se guardará una copia del estado actual antes de importar. El estado recibido contiene ' +
+              counts.vehicles + ' vehículos, ' + counts.history + ' movimientos, ' + counts.reminders + ' recordatorios y ' + counts.fixed_expenses + ' gastos fijos. ¿Continuar?',
+              danger: true, confirmText: 'Crear copia e importar' }).then(function (ok) {
+              if (!ok) return;
+              try { store.importJSON(r.result).then(function () { ui.toast('Copia previa guardada e importación completada', 'success'); App.router.render(); })
+                .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa', 'error'); }); }
+              catch (e) { ui.toast(e.message || 'Archivo inválido', 'error'); }
+            });
+          } catch (e) { ui.toast('Archivo JSON inválido', 'error'); }
         };
         r.readAsText(f);
       });
@@ -9750,6 +10209,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   // excelAutosaveCard/datosCard/parametrosCard) — ninguna lógica cambió,
   // solo dónde se muestra.
   var ajustesScreen = 'home';
+  var auditCache = null, auditLoading = false, auditLoadingMore = false, auditHasMore = false, auditOperationsHasMore = false, auditDisplayLimit = 150, auditError = '';
+  var remoteSnapshotCache = null, snapshotsLoading = false, snapshotsLoadingMore = false, snapshotsHasMore = false, snapshotsError = '';
 
   // Componentes de configuración (SaaS): título + descripción a la izquierda,
   // control a la derecha, agrupados con separadores finos.
@@ -9780,7 +10241,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     var SECTIONS = [['apariencia', 'Apariencia', aparienciaSec]];
     if (online) SECTIONS.push(['cuenta', 'Mi cuenta', cuentaSec]);
     if (isAdmin) SECTIONS.push(['usuarios', 'Usuarios', usuariosSec]);
-    SECTIONS.push(['preferencias', 'Avisos', avisosSec], ['financiero', 'Financiero', parametrosSec], ['datos', 'Datos y copias', datosSec], ['sync', 'Excel automático', excelSec]);
+    SECTIONS.push(['preferencias', 'Avisos', avisosSec], ['financiero', 'Financiero', parametrosSec],
+      ['auditoria', 'Auditoría', auditoriaSec], ['datos', 'Copias y restauración', datosSec], ['sync', 'Excel automático', excelSec]);
     if (showDanger) SECTIONS.push(['peligro', 'Zona peligrosa', peligroSec]);
 
     var navBtns = SECTIONS.map(function (s) {
@@ -9976,26 +10438,148 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function datosSec() {
-    var snaps = store.getSnapshots();
+    if (remoteSnapshotCache === null && !snapshotsLoading && App.data && App.data.fetchSnapshots) {
+      snapshotsLoading = true;
+      App.data.fetchSnapshots(0).then(function (rows) { remoteSnapshotCache = rows; snapshotsHasMore = rows.length === 100; snapshotsError = ''; })
+        .catch(function (e) { remoteSnapshotCache = []; snapshotsError = e.message || 'No se pudieron cargar las copias.'; })
+        .then(function () { snapshotsLoading = false; if (ajustesScreen === 'datos') App.router.render(); });
+    }
+    var localSnaps = store.getSnapshots();
+    var snaps = remoteSnapshotCache && remoteSnapshotCache.length ? remoteSnapshotCache.map(function (r) {
+      var st = r.summary || {};
+      return { id: r.id, ts: new Date(r.created_at).getTime(), fecha: r.snapshot_day || r.created_at, etiqueta: r.label || 'Estado completo',
+        autos: st.vehicles || 0, summary: st, user: r.created_by, remote: true };
+    }).concat(localSnaps.filter(function (l) { return !remoteSnapshotCache.some(function (r) { return Math.abs(new Date(r.created_at).getTime() - l.ts) < 1000; }); })) : localSnaps;
     var snapRows = [];
     if (!snaps.length) {
-      snapRows.push(cfgRow('Sin copias todavía', 'La app guarda sola una copia por día (las últimas 5). Si borrás algo sin querer, acá lo podés volver a como estaba.'));
+      snapRows.push(cfgRow('Sin copias todavía', snapshotsLoading ? 'Cargando copias…' : 'Se guarda un punto diario y podés crear copias manuales.'));
     } else {
       snaps.forEach(function (sn) {
-        snapRows.push(cfgRow(fmt.datetime(sn.ts), sn.autos + (sn.autos === 1 ? ' auto' : ' autos'), el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Restaurar', onclick: function () {
-          ui.confirm({ title: 'Restaurar copia', message: 'Los datos actuales se reemplazan por la copia del ' + fmt.datetime(sn.ts) + '. ¿Seguir?', danger: true, confirmText: 'Restaurar' })
-            .then(function (ok) { if (ok) { if (store.restoreSnapshot(sn.ts)) { ui.toast('Copia restaurada', 'success'); App.router.go(''); } else ui.toast('No se pudo restaurar', 'error'); } });
-        } })));
+        var dateTs = sn.ts;
+        var restore = el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Restaurar', onclick: function () {
+          ui.confirm({ title: 'Restaurar estado', message: 'Se creará automáticamente una copia del estado actual antes de restaurar «' + (sn.etiqueta || 'Estado completo') + '». ¿Continuar?', danger: true, confirmText: 'Crear copia y restaurar' })
+            .then(function (ok) { if (!ok) return; var task = sn.remote ? App.data.restoreRemoteSnapshot(sn.id) : Promise.resolve(store.restoreSnapshot(dateTs));
+              task.then(function (done) { if (done) { ui.toast('Copia previa creada y estado restaurado', 'success'); App.router.go(''); } else ui.toast('No se pudo restaurar', 'error'); })
+                .catch(function (e) { ui.toast(e.message || 'No se pudo restaurar', 'error'); }); });
+        } });
+        var preview = el('pre', { text: sn.remote ? 'Cargá el contenido para ver el estado completo.' : JSON.stringify(stateFromLocal(dateTs), null, 2) });
+        var details = el('details', { class: 'cfg-note' }, [el('summary', { text: 'Ver contenido' }),
+          sn.remote ? el('button', { class: 'btn btn-sm btn-ghost', text: 'Cargar contenido', onclick: function () {
+            App.data.fetchSnapshotDetails(sn.id).then(function (row) { preview.textContent = JSON.stringify(row.state, null, 2); })
+              .catch(function (e) { preview.textContent = e.message || 'No se pudo cargar el contenido.'; });
+          } }) : null, preview]);
+        snapRows.push(cfgRow(snapshotDateTimeAR(sn.ts), (sn.etiqueta || 'Estado completo') + ' · ' + sn.autos + (sn.autos === 1 ? ' vehículo' : ' vehículos'), el('div', {}, [restore, details])));
       });
     }
-    return [cfgSec('Datos y copias', 'Papelera, exportación y copias de seguridad.', [
-      cfgGroup([
-        cfgRow('Papelera', 'Vehículos eliminados: restauralos o borralos definitivamente.', el('a', { class: 'btn btn-ghost', href: '#/papelera' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')])),
-        cfgRow('Exportar', 'Excel completo, copia de seguridad (JSON) y archivos CSV.', el('a', { class: 'btn btn-ghost', href: '#/exportar' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')]))
-      ]),
-      cfgSub('Copias automáticas'),
-      el('p', { class: 'cfg-note', text: snaps.length ? 'Copias de los últimos días. Restaurar reemplaza los datos actuales (antes de hacerlo se guarda otra copia).' : '' }),
+    if (snapshotsHasMore) snapRows.push(cfgRow('Puntos anteriores', 'El historial sigue completo en Supabase.',
+      el('button', { class: 'btn btn-sm btn-ghost', text: snapshotsLoadingMore ? 'Cargando…' : 'Cargar anteriores', onclick: function () {
+        if (snapshotsLoadingMore) return; snapshotsLoadingMore = true;
+        App.data.fetchSnapshots(remoteSnapshotCache.length).then(function (rows) {
+          remoteSnapshotCache = remoteSnapshotCache.concat(rows); snapshotsHasMore = rows.length === 100;
+          snapshotsLoadingMore = false; if (ajustesScreen === 'datos') App.router.render();
+        }).catch(function (e) { snapshotsLoadingMore = false; snapshotsError = e.message || 'No se pudieron cargar las copias anteriores.'; if (ajustesScreen === 'datos') App.router.render(); });
+      } })));
+    return [cfgSec('Copias y restauración', 'Puntos de restauración del estado completo de la aplicación.', [
+      cfgGroup([cfgRow('Crear punto ahora', 'Guarda vehículos, historial, gastos, gastos fijos, recordatorios, configuraciones y papelera.',
+        el('button', { class: 'btn btn-primary', type: 'button', text: 'Crear copia', onclick: function () {
+          store.createSnapshot('Punto manual', !!(App.auth && App.auth.enabled && !(App.data && App.data.isOffline && App.data.isOffline()))).then(function () { ui.toast('Punto de restauración creado', 'success'); remoteSnapshotCache = null; snapshotsError = ''; App.router.render(); })
+            .catch(function (e) { ui.toast(e.message || 'No se pudo crear la copia remota', 'error'); });
+        } })), cfgRow('Actualizar lista', null, el('button', { class: 'btn btn-ghost', type: 'button', text: 'Actualizar', onclick: function () { remoteSnapshotCache = null; snapshotsError = ''; snapshotsHasMore = false; App.router.render(); } }))]),
+      snapshotsError ? el('p', { class: 'cfg-note', text: snapshotsError }) : null,
+      cfgGroup([cfgRow('Papelera', 'Elementos eliminados que todavía se pueden recuperar.', el('a', { class: 'btn btn-ghost', href: '#/papelera' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')])),
+        cfgRow('Exportar', 'Copia JSON y archivos de trabajo.', el('a', { class: 'btn btn-ghost', href: '#/exportar' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')]))]),
+      cfgSub('Puntos disponibles'),
+      el('p', { class: 'cfg-note', text: 'Antes de restaurar se guarda automáticamente el estado actual con la etiqueta «Estado anterior a restauración». Las copias locales dependen del almacenamiento de este navegador; las copias de Supabase quedan compartidas entre usuarios activos.' }),
       cfgGroup(snapRows)
+    ])];
+  }
+
+  function stateFromLocal(ts) {
+    try { var all = JSON.parse(localStorage.getItem('paginaToto:snapshots') || '[]'); var item = all.filter(function (x) { return x.ts === ts; })[0]; return item ? JSON.parse(item.data) : {}; } catch (e) { return {}; }
+  }
+
+  function snapshotDateTimeAR(ts) {
+    try { return new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', dateStyle: 'short', timeStyle: 'short' }).format(new Date(ts)); }
+    catch (e) { return fmt.datetime(ts); }
+  }
+
+  function auditoriaSec() {
+    if (auditCache === null && !auditLoading && (!App.data || !App.data.fetchAudit)) {
+      auditCache = { rows: [], operations: [], profiles: [] };
+      auditError = 'La versión local no conecta con PostgreSQL. La auditoría de base está disponible en la versión online después de aplicar la migración.';
+    }
+    if (auditCache === null && !auditLoading && App.data && App.data.fetchAudit) {
+      auditLoading = true;
+      App.data.fetchAudit(0, 0).then(function (data) { auditCache = data; auditHasMore = data.rows.length === 500; auditOperationsHasMore = data.operations.length === 500; auditError = ''; })
+        .catch(function (e) { auditCache = { rows: [], operations: [] }; auditError = e.message || 'No se pudo leer la auditoría.'; })
+        .then(function () { auditLoading = false; if (ajustesScreen === 'auditoria') App.router.render(); });
+    }
+    var filter = ui.select([
+      { value: 'todos', label: 'Todos' }, { value: 'INSERT', label: 'Crear' }, { value: 'UPDATE', label: 'Modificar' },
+      { value: 'DELETE', label: 'Eliminar' }, { value: 'restauracion', label: 'Restauraciones' }, { value: 'masivas', label: 'Operaciones masivas' }
+    ], 'todos', { class: 'input select' });
+    var content = el('div', {});
+    function actorName(uid) {
+      if (!uid) return 'No disponible (consulta directa sin auth UID)';
+      var p = auditCache && (auditCache.profiles || []).filter(function (x) { return x.id === uid; })[0];
+      return p ? (p.nombre || p.email || uid) : uid;
+    }
+    function renderRows() {
+      ui.clear(content);
+      if (auditError) { content.appendChild(el('p', { class: 'cfg-note', text: auditError })); return; }
+      if (!auditCache) { content.appendChild(el('p', { class: 'cfg-note', text: auditLoading ? 'Cargando auditoría…' : 'La auditoría todavía no se cargó.' })); return; }
+      var groups = {}, entries = [];
+      auditCache.rows.forEach(function (r) { var key = String(r.transaction_id); (groups[key] || (groups[key] = [])).push(r); });
+      Object.keys(groups).forEach(function (key) { entries.push({ type: 'db', rows: groups[key], ts: groups[key][0].occurred_at }); });
+      auditCache.operations.forEach(function (o) { entries.push({ type: 'app', op: o, ts: o.occurred_at }); });
+      entries.sort(function (a, b) { return new Date(b.ts) - new Date(a.ts); });
+      var deliveryCutoff = App.data && App.data.deliveryEstablishedAt ? App.data.deliveryEstablishedAt() : null;
+      function deliveryPeriod(ts) { return deliveryCutoff && new Date(ts).getTime() < deliveryCutoff ? 'PREVIO A LA ENTREGA · ' : ''; }
+      if (filter.value !== 'todos') entries = entries.filter(function (e) {
+        if (filter.value === 'masivas') return e.type === 'db' ? (e.rows.length > 1 || e.rows.some(function (r) { return r.operation === 'TRUNCATE'; })) : /import|reinicio|restauracion/i.test(e.op.action);
+        if (filter.value === 'restauracion') return e.type === 'app' && /restauracion/i.test(e.op.action);
+        return e.type === 'db' && e.rows.some(function (r) { return filter.value === 'DELETE' ? (r.operation === 'DELETE' || r.operation === 'TRUNCATE') : r.operation === filter.value; });
+      });
+      if (!entries.length) { content.appendChild(el('p', { class: 'cfg-note', text: 'No hay eventos para este filtro.' })); return; }
+      entries.slice(0, auditDisplayLimit).forEach(function (e) {
+        if (e.type === 'app') {
+          var o = e.op;
+          content.appendChild(el('details', { class: 'card audit-item' }, [
+            el('summary', { text: deliveryPeriod(o.occurred_at) + fmt.datetime(new Date(o.occurred_at).getTime()) + ' · ' + o.action.toUpperCase() + ' · ' + o.entity }),
+            el('p', { text: 'Usuario: ' + actorName(o.actor_uid) }), el('pre', { text: JSON.stringify(o.details || {}, null, 2) })
+          ]));
+          return;
+        }
+        var rs = e.rows, counts = {};
+        rs.forEach(function (r) { var k = r.table_name + ' · ' + r.operation; counts[k] = (counts[k] || 0) + 1; });
+        var summary = Object.keys(counts).map(function (k) { return k + ': ' + counts[k]; }).join(' · ');
+        content.appendChild(el('details', { class: 'card audit-item' }, [
+          el('summary', { text: deliveryPeriod(e.ts) + fmt.datetime(new Date(e.ts).getTime()) + ' · ' + (rs.length > 1 ? 'OPERACIÓN MASIVA · ' : '') + summary }),
+          rs.map(function (r) { return el('section', { class: 'audit-row' }, [
+            el('strong', { text: r.table_name + ' · ' + r.operation + ' · registro ' + JSON.stringify(r.record_id) }),
+            el('p', { text: 'Usuario: ' + actorName(r.actor_uid) + ' · Rol DB: ' + r.db_role + ' · Tx: ' + r.transaction_id }),
+            r.before_data ? el('div', {}, [el('h4', { text: 'ANTES' }), el('pre', { text: JSON.stringify(r.before_data, null, 2) })]) : null,
+            r.after_data ? el('div', {}, [el('h4', { text: 'DESPUÉS' }), el('pre', { text: JSON.stringify(r.after_data, null, 2) })]) : null
+          ]); })
+        ]));
+      });
+      if (auditDisplayLimit < entries.length) content.appendChild(el('button', { class: 'btn btn-ghost', text: 'Mostrar más eventos', onclick: function () { auditDisplayLimit += 150; renderRows(); } }));
+      else if (auditHasMore || auditOperationsHasMore) content.appendChild(el('button', { class: 'btn btn-ghost', text: auditLoadingMore ? 'Cargando…' : 'Cargar eventos anteriores', onclick: function () {
+        if (auditLoadingMore) return; auditLoadingMore = true;
+        App.data.fetchAudit(auditCache.rows.length, auditCache.operations.length).then(function (more) {
+          auditCache.rows = auditCache.rows.concat(more.rows); auditHasMore = more.rows.length === 500;
+          auditCache.operations = auditCache.operations.concat(more.operations); auditOperationsHasMore = more.operations.length === 500;
+          auditLoadingMore = false; auditDisplayLimit += 150; renderRows();
+        }).catch(function (e) { auditLoadingMore = false; auditError = e.message || 'No se pudieron cargar más eventos.'; renderRows(); });
+        renderRows();
+      } }));
+    }
+    filter.addEventListener('change', function () { auditDisplayLimit = 150; renderRows(); }); renderRows();
+    return [cfgSec('Auditoría', 'Registro de cambios por fila en PostgreSQL y eventos de importación/restauración de la aplicación.', [
+      cfgGroup([cfgRow('Filtrar eventos', 'La auditoría de base registra INSERT, UPDATE y DELETE con los datos completos.', filter),
+        cfgRow('Actualizar lista', null, el('button', { class: 'btn btn-ghost', type: 'button', text: 'Actualizar', onclick: function () { auditCache = null; auditError = ''; App.router.render(); } }))]),
+      auditError ? el('button', { class: 'btn btn-ghost', text: 'Reintentar', onclick: function () { auditCache = null; auditError = ''; App.router.render(); } }) : null,
+      content
     ])];
   }
 
@@ -10034,7 +10618,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
               .then(function (ok) {
                 if (!ok) return;
                 try { ui.downloadFile('paginatoto-ANTES-DE-BORRAR-' + store.todayISO() + '.json', store.exportJSON(), 'application/json'); } catch (e) {}
-                setTimeout(function () { store.resetAll(); ui.toast('Datos borrados. Guardá el archivo que se descargó.'); App.router.go(''); }, 400);
+                store.resetAll().then(function () { ui.toast('Datos reiniciados. Se guardó una copia previa y el archivo descargado.', 'success'); App.router.go(''); })
+                  .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa; no se reinició el estado.', 'error'); });
               });
           } })])
         ])

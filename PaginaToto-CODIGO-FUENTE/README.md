@@ -3,7 +3,7 @@
 Aplicación web completa para administrar un negocio de compra y venta de vehículos:
 stock, compras, gastos, cuotas, ventas, vehículos recibidos como parte de pago,
 rentabilidad, finanzas, resúmenes, gráficos, historial, comparación según el dólar,
-alertas, clientes/proveedores, estadísticas, exportación y papelera.
+alertas, clientes/proveedores, estadísticas, exportación y papelera recuperable.
 
 Todo funciona 100% en el navegador. Los datos se guardan automáticamente en el
 navegador (localStorage) — no se envía nada a internet.
@@ -24,15 +24,31 @@ y entrar a `http://localhost:4599/index.html`.
 > Se usa un mini servidor local porque los navegadores bloquean parte del
 > funcionamiento al abrir el `index.html` directamente con doble clic (`file://`).
 
-## Datos de ejemplo
+## Estado inicial
 
-La primera vez se cargan 3 autos de ejemplo para que la app no se vea vacía.
-Se pueden borrar todos desde **Ajustes → Reiniciar todos los datos**.
+La aplicación comienza vacía. No carga vehículos ni movimientos de demostración.
+En la versión online, la etapa comercial vigente se obtiene de Supabase; los datos
+locales anteriores de otra etapa se invalidan al iniciar sesión, sin borrar la
+sesión ni las preferencias del navegador.
 
 ## Copia de seguridad
 
 En **Exportar** podés descargar toda la base en JSON (y volver a importarla),
 además de exportar autos, movimientos, compras, ventas y resúmenes en CSV/Excel.
+
+En la versión online, **Ajustes → Auditoría** consulta el registro por fila de
+PostgreSQL y los eventos de importación/restauración. **Ajustes → Copias y
+restauración** muestra snapshots diarios y manuales, sin vencimiento automático.
+La versión online utiliza `audit_log`, `app_trash`, `app_operations` y
+`app_snapshots` en Supabase. Las migraciones y el informe de instalación están en
+`SUPABASE/`; los snapshots no vencen automáticamente. La versión local guarda
+copias solo en `localStorage`, sujeto al espacio de ese navegador.
+
+## Regenerar bundles
+
+Después de editar fuentes, ejecutar `node scripts/build-inline-bundles.js` desde
+la raíz del repositorio. El script actualiza los HTML autocontenidos y la versión
+de caché de los módulos principales.
 
 ## Estructura del proyecto
 

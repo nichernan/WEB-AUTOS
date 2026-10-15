@@ -18,11 +18,13 @@ Excel y papelera.
 
 ## Publicar la versión web
 
-1. Tener un proyecto de Supabase configurado siguiendo `SUPABASE/PASOS.txt`.
-2. Subir el contenido de la carpeta `PaginaToto-WEB/` a un hosting estático
-   (Netlify, GitHub Pages, Cloudflare Pages, etc.) — no necesita build ni backend propio.
-3. Entrar con el usuario administrador creado en el paso 1 y, desde
-   **Ajustes → Usuarios**, dar de alta al resto de las personas del negocio.
+1. Las fuentes están en `PaginaToto-CODIGO-FUENTE/`; los bundles se regeneran con
+   `node scripts/build-inline-bundles.js`.
+2. `wrangler.toml` publica `PaginaToto-WEB/` como assets estáticos del Worker
+   `web-autos` de Cloudflare.
+3. El backend de producción es el proyecto Supabase WebTotoAuto `wprhqjmhsqwncbhouxvl`.
+   Las migraciones, verificaciones y estado de la entrega se describen en
+   `SUPABASE/SEGURIDAD-Y-RECUPERACION.md`.
 
 ## Notas de seguridad
 

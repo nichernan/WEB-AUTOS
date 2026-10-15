@@ -1512,21 +1512,23 @@
   /* ============================== PAPELERA ========================= */
   function papeleraView(root) {
     var wrap = el('div', { class: 'page' });
-    wrap.appendChild(pageHead('Papelera', 'Vehículos eliminados. Podés restaurarlos o borrarlos definitivamente.'));
-    var list = store.trashedVehicles();
+    wrap.appendChild(pageHead('Papelera', 'Elementos eliminados. Podés consultar sus datos originales y restaurarlos.'));
+    var list = store.getTrash();
     if (!list.length) { wrap.appendChild(ui.emptyState('La papelera está vacía.', '🗑️')); root.appendChild(wrap); return; }
-    list.forEach(function (v) {
+    list.forEach(function (item) {
+      var vehicle = item.entity === 'vehicle' ? (item.data.vehicle || item.data) : null;
+      var title = vehicle ? store.vehicleName(vehicle) : item.label;
       wrap.appendChild(el('div', { class: 'card trash-item' }, [
         el('div', { class: 'trash-info' }, [
-          el('strong', { text: store.vehicleName(v) }),
-          el('span', { class: 'muted', text: (v.patente || '') + ' · eliminado ' + fmt.relative(isoOf(new Date(v.deletedAt))) })
+          el('strong', { text: title }),
+          el('span', { class: 'muted', text: (item.entityId || '') + ' · eliminado ' + fmt.datetime(item.deletedAt) + (item.deletedBy ? ' · usuario ' + item.deletedBy : '') })
         ]),
         el('div', { class: 'row-btns' }, [
-          el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () { store.restoreVehicle(v.id); ui.toast('Vehículo restaurado', 'success'); App.router.render(); } }),
-          el('button', { class: 'btn btn-sm btn-danger', text: 'Eliminar definitivamente', onclick: function () {
-            ui.confirm({ title: 'Eliminar definitivamente', message: 'Esta acción no se puede deshacer. ¿Eliminar "' + store.vehicleName(v) + '" para siempre?', danger: true, confirmText: 'Eliminar para siempre' })
-              .then(function (ok) { if (ok) { store.hardDeleteVehicle(v.id); ui.toast('Vehículo eliminado'); App.router.render(); } });
-          } })
+          el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () {
+            if (store.restoreTrash(item.id)) { ui.toast('Elemento restaurado', 'success'); App.router.render(); }
+            else ui.toast('No se pudo restaurar; puede faltar el elemento relacionado.', 'error');
+          } }),
+          el('details', { class: 'cfg-note' }, [el('summary', { text: 'Ver datos originales' }), el('pre', { text: JSON.stringify(item.data, null, 2) })])
         ])
       ]));
     });
@@ -1651,8 +1653,19 @@
         var f = inp.files[0]; if (!f) return;
         var r = new FileReader();
         r.onload = function () {
-          try { store.importJSON(r.result); ui.toast('Datos importados', 'success'); App.router.render(); }
-          catch (e) { ui.toast('Archivo inválido', 'error'); }
+          try {
+            var preview = JSON.parse(r.result);
+            var counts = { vehicles: (preview.vehicles || []).length, history: (preview.history || []).length,
+              reminders: (preview.reminders || []).length, fixed_expenses: (preview.fixedExpenses || []).length };
+            ui.confirm({ title: 'Importar copia JSON', message: 'Se guardará una copia del estado actual antes de importar. El estado recibido contiene ' +
+              counts.vehicles + ' vehículos, ' + counts.history + ' movimientos, ' + counts.reminders + ' recordatorios y ' + counts.fixed_expenses + ' gastos fijos. ¿Continuar?',
+              danger: true, confirmText: 'Crear copia e importar' }).then(function (ok) {
+              if (!ok) return;
+              try { store.importJSON(r.result).then(function () { ui.toast('Copia previa guardada e importación completada', 'success'); App.router.render(); })
+                .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa', 'error'); }); }
+              catch (e) { ui.toast(e.message || 'Archivo inválido', 'error'); }
+            });
+          } catch (e) { ui.toast('Archivo JSON inválido', 'error'); }
         };
         r.readAsText(f);
       });
@@ -1668,6 +1681,8 @@
   // excelAutosaveCard/datosCard/parametrosCard) — ninguna lógica cambió,
   // solo dónde se muestra.
   var ajustesScreen = 'home';
+  var auditCache = null, auditLoading = false, auditLoadingMore = false, auditHasMore = false, auditOperationsHasMore = false, auditDisplayLimit = 150, auditError = '';
+  var remoteSnapshotCache = null, snapshotsLoading = false, snapshotsLoadingMore = false, snapshotsHasMore = false, snapshotsError = '';
 
   // Componentes de configuración (SaaS): título + descripción a la izquierda,
   // control a la derecha, agrupados con separadores finos.
@@ -1698,7 +1713,8 @@
     var SECTIONS = [['apariencia', 'Apariencia', aparienciaSec]];
     if (online) SECTIONS.push(['cuenta', 'Mi cuenta', cuentaSec]);
     if (isAdmin) SECTIONS.push(['usuarios', 'Usuarios', usuariosSec]);
-    SECTIONS.push(['preferencias', 'Avisos', avisosSec], ['financiero', 'Financiero', parametrosSec], ['datos', 'Datos y copias', datosSec], ['sync', 'Excel automático', excelSec]);
+    SECTIONS.push(['preferencias', 'Avisos', avisosSec], ['financiero', 'Financiero', parametrosSec],
+      ['auditoria', 'Auditoría', auditoriaSec], ['datos', 'Copias y restauración', datosSec], ['sync', 'Excel automático', excelSec]);
     if (showDanger) SECTIONS.push(['peligro', 'Zona peligrosa', peligroSec]);
 
     var navBtns = SECTIONS.map(function (s) {
@@ -1894,26 +1910,148 @@
   }
 
   function datosSec() {
-    var snaps = store.getSnapshots();
+    if (remoteSnapshotCache === null && !snapshotsLoading && App.data && App.data.fetchSnapshots) {
+      snapshotsLoading = true;
+      App.data.fetchSnapshots(0).then(function (rows) { remoteSnapshotCache = rows; snapshotsHasMore = rows.length === 100; snapshotsError = ''; })
+        .catch(function (e) { remoteSnapshotCache = []; snapshotsError = e.message || 'No se pudieron cargar las copias.'; })
+        .then(function () { snapshotsLoading = false; if (ajustesScreen === 'datos') App.router.render(); });
+    }
+    var localSnaps = store.getSnapshots();
+    var snaps = remoteSnapshotCache && remoteSnapshotCache.length ? remoteSnapshotCache.map(function (r) {
+      var st = r.summary || {};
+      return { id: r.id, ts: new Date(r.created_at).getTime(), fecha: r.snapshot_day || r.created_at, etiqueta: r.label || 'Estado completo',
+        autos: st.vehicles || 0, summary: st, user: r.created_by, remote: true };
+    }).concat(localSnaps.filter(function (l) { return !remoteSnapshotCache.some(function (r) { return Math.abs(new Date(r.created_at).getTime() - l.ts) < 1000; }); })) : localSnaps;
     var snapRows = [];
     if (!snaps.length) {
-      snapRows.push(cfgRow('Sin copias todavía', 'La app guarda sola una copia por día (las últimas 5). Si borrás algo sin querer, acá lo podés volver a como estaba.'));
+      snapRows.push(cfgRow('Sin copias todavía', snapshotsLoading ? 'Cargando copias…' : 'Se guarda un punto diario y podés crear copias manuales.'));
     } else {
       snaps.forEach(function (sn) {
-        snapRows.push(cfgRow(fmt.datetime(sn.ts), sn.autos + (sn.autos === 1 ? ' auto' : ' autos'), el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Restaurar', onclick: function () {
-          ui.confirm({ title: 'Restaurar copia', message: 'Los datos actuales se reemplazan por la copia del ' + fmt.datetime(sn.ts) + '. ¿Seguir?', danger: true, confirmText: 'Restaurar' })
-            .then(function (ok) { if (ok) { if (store.restoreSnapshot(sn.ts)) { ui.toast('Copia restaurada', 'success'); App.router.go(''); } else ui.toast('No se pudo restaurar', 'error'); } });
-        } })));
+        var dateTs = sn.ts;
+        var restore = el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: 'Restaurar', onclick: function () {
+          ui.confirm({ title: 'Restaurar estado', message: 'Se creará automáticamente una copia del estado actual antes de restaurar «' + (sn.etiqueta || 'Estado completo') + '». ¿Continuar?', danger: true, confirmText: 'Crear copia y restaurar' })
+            .then(function (ok) { if (!ok) return; var task = sn.remote ? App.data.restoreRemoteSnapshot(sn.id) : Promise.resolve(store.restoreSnapshot(dateTs));
+              task.then(function (done) { if (done) { ui.toast('Copia previa creada y estado restaurado', 'success'); App.router.go(''); } else ui.toast('No se pudo restaurar', 'error'); })
+                .catch(function (e) { ui.toast(e.message || 'No se pudo restaurar', 'error'); }); });
+        } });
+        var preview = el('pre', { text: sn.remote ? 'Cargá el contenido para ver el estado completo.' : JSON.stringify(stateFromLocal(dateTs), null, 2) });
+        var details = el('details', { class: 'cfg-note' }, [el('summary', { text: 'Ver contenido' }),
+          sn.remote ? el('button', { class: 'btn btn-sm btn-ghost', text: 'Cargar contenido', onclick: function () {
+            App.data.fetchSnapshotDetails(sn.id).then(function (row) { preview.textContent = JSON.stringify(row.state, null, 2); })
+              .catch(function (e) { preview.textContent = e.message || 'No se pudo cargar el contenido.'; });
+          } }) : null, preview]);
+        snapRows.push(cfgRow(snapshotDateTimeAR(sn.ts), (sn.etiqueta || 'Estado completo') + ' · ' + sn.autos + (sn.autos === 1 ? ' vehículo' : ' vehículos'), el('div', {}, [restore, details])));
       });
     }
-    return [cfgSec('Datos y copias', 'Papelera, exportación y copias de seguridad.', [
-      cfgGroup([
-        cfgRow('Papelera', 'Vehículos eliminados: restauralos o borralos definitivamente.', el('a', { class: 'btn btn-ghost', href: '#/papelera' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')])),
-        cfgRow('Exportar', 'Excel completo, copia de seguridad (JSON) y archivos CSV.', el('a', { class: 'btn btn-ghost', href: '#/exportar' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')]))
-      ]),
-      cfgSub('Copias automáticas'),
-      el('p', { class: 'cfg-note', text: snaps.length ? 'Copias de los últimos días. Restaurar reemplaza los datos actuales (antes de hacerlo se guarda otra copia).' : '' }),
+    if (snapshotsHasMore) snapRows.push(cfgRow('Puntos anteriores', 'El historial sigue completo en Supabase.',
+      el('button', { class: 'btn btn-sm btn-ghost', text: snapshotsLoadingMore ? 'Cargando…' : 'Cargar anteriores', onclick: function () {
+        if (snapshotsLoadingMore) return; snapshotsLoadingMore = true;
+        App.data.fetchSnapshots(remoteSnapshotCache.length).then(function (rows) {
+          remoteSnapshotCache = remoteSnapshotCache.concat(rows); snapshotsHasMore = rows.length === 100;
+          snapshotsLoadingMore = false; if (ajustesScreen === 'datos') App.router.render();
+        }).catch(function (e) { snapshotsLoadingMore = false; snapshotsError = e.message || 'No se pudieron cargar las copias anteriores.'; if (ajustesScreen === 'datos') App.router.render(); });
+      } })));
+    return [cfgSec('Copias y restauración', 'Puntos de restauración del estado completo de la aplicación.', [
+      cfgGroup([cfgRow('Crear punto ahora', 'Guarda vehículos, historial, gastos, gastos fijos, recordatorios, configuraciones y papelera.',
+        el('button', { class: 'btn btn-primary', type: 'button', text: 'Crear copia', onclick: function () {
+          store.createSnapshot('Punto manual', !!(App.auth && App.auth.enabled && !(App.data && App.data.isOffline && App.data.isOffline()))).then(function () { ui.toast('Punto de restauración creado', 'success'); remoteSnapshotCache = null; snapshotsError = ''; App.router.render(); })
+            .catch(function (e) { ui.toast(e.message || 'No se pudo crear la copia remota', 'error'); });
+        } })), cfgRow('Actualizar lista', null, el('button', { class: 'btn btn-ghost', type: 'button', text: 'Actualizar', onclick: function () { remoteSnapshotCache = null; snapshotsError = ''; snapshotsHasMore = false; App.router.render(); } }))]),
+      snapshotsError ? el('p', { class: 'cfg-note', text: snapshotsError }) : null,
+      cfgGroup([cfgRow('Papelera', 'Elementos eliminados que todavía se pueden recuperar.', el('a', { class: 'btn btn-ghost', href: '#/papelera' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')])),
+        cfgRow('Exportar', 'Copia JSON y archivos de trabajo.', el('a', { class: 'btn btn-ghost', href: '#/exportar' }, [el('span', { text: 'Abrir' }), ui.icon('chevron')]))]),
+      cfgSub('Puntos disponibles'),
+      el('p', { class: 'cfg-note', text: 'Antes de restaurar se guarda automáticamente el estado actual con la etiqueta «Estado anterior a restauración». Las copias locales dependen del almacenamiento de este navegador; las copias de Supabase quedan compartidas entre usuarios activos.' }),
       cfgGroup(snapRows)
+    ])];
+  }
+
+  function stateFromLocal(ts) {
+    try { var all = JSON.parse(localStorage.getItem('paginaToto:snapshots') || '[]'); var item = all.filter(function (x) { return x.ts === ts; })[0]; return item ? JSON.parse(item.data) : {}; } catch (e) { return {}; }
+  }
+
+  function snapshotDateTimeAR(ts) {
+    try { return new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', dateStyle: 'short', timeStyle: 'short' }).format(new Date(ts)); }
+    catch (e) { return fmt.datetime(ts); }
+  }
+
+  function auditoriaSec() {
+    if (auditCache === null && !auditLoading && (!App.data || !App.data.fetchAudit)) {
+      auditCache = { rows: [], operations: [], profiles: [] };
+      auditError = 'La versión local no conecta con PostgreSQL. La auditoría de base está disponible en la versión online después de aplicar la migración.';
+    }
+    if (auditCache === null && !auditLoading && App.data && App.data.fetchAudit) {
+      auditLoading = true;
+      App.data.fetchAudit(0, 0).then(function (data) { auditCache = data; auditHasMore = data.rows.length === 500; auditOperationsHasMore = data.operations.length === 500; auditError = ''; })
+        .catch(function (e) { auditCache = { rows: [], operations: [] }; auditError = e.message || 'No se pudo leer la auditoría.'; })
+        .then(function () { auditLoading = false; if (ajustesScreen === 'auditoria') App.router.render(); });
+    }
+    var filter = ui.select([
+      { value: 'todos', label: 'Todos' }, { value: 'INSERT', label: 'Crear' }, { value: 'UPDATE', label: 'Modificar' },
+      { value: 'DELETE', label: 'Eliminar' }, { value: 'restauracion', label: 'Restauraciones' }, { value: 'masivas', label: 'Operaciones masivas' }
+    ], 'todos', { class: 'input select' });
+    var content = el('div', {});
+    function actorName(uid) {
+      if (!uid) return 'No disponible (consulta directa sin auth UID)';
+      var p = auditCache && (auditCache.profiles || []).filter(function (x) { return x.id === uid; })[0];
+      return p ? (p.nombre || p.email || uid) : uid;
+    }
+    function renderRows() {
+      ui.clear(content);
+      if (auditError) { content.appendChild(el('p', { class: 'cfg-note', text: auditError })); return; }
+      if (!auditCache) { content.appendChild(el('p', { class: 'cfg-note', text: auditLoading ? 'Cargando auditoría…' : 'La auditoría todavía no se cargó.' })); return; }
+      var groups = {}, entries = [];
+      auditCache.rows.forEach(function (r) { var key = String(r.transaction_id); (groups[key] || (groups[key] = [])).push(r); });
+      Object.keys(groups).forEach(function (key) { entries.push({ type: 'db', rows: groups[key], ts: groups[key][0].occurred_at }); });
+      auditCache.operations.forEach(function (o) { entries.push({ type: 'app', op: o, ts: o.occurred_at }); });
+      entries.sort(function (a, b) { return new Date(b.ts) - new Date(a.ts); });
+      var deliveryCutoff = App.data && App.data.deliveryEstablishedAt ? App.data.deliveryEstablishedAt() : null;
+      function deliveryPeriod(ts) { return deliveryCutoff && new Date(ts).getTime() < deliveryCutoff ? 'PREVIO A LA ENTREGA · ' : ''; }
+      if (filter.value !== 'todos') entries = entries.filter(function (e) {
+        if (filter.value === 'masivas') return e.type === 'db' ? (e.rows.length > 1 || e.rows.some(function (r) { return r.operation === 'TRUNCATE'; })) : /import|reinicio|restauracion/i.test(e.op.action);
+        if (filter.value === 'restauracion') return e.type === 'app' && /restauracion/i.test(e.op.action);
+        return e.type === 'db' && e.rows.some(function (r) { return filter.value === 'DELETE' ? (r.operation === 'DELETE' || r.operation === 'TRUNCATE') : r.operation === filter.value; });
+      });
+      if (!entries.length) { content.appendChild(el('p', { class: 'cfg-note', text: 'No hay eventos para este filtro.' })); return; }
+      entries.slice(0, auditDisplayLimit).forEach(function (e) {
+        if (e.type === 'app') {
+          var o = e.op;
+          content.appendChild(el('details', { class: 'card audit-item' }, [
+            el('summary', { text: deliveryPeriod(o.occurred_at) + fmt.datetime(new Date(o.occurred_at).getTime()) + ' · ' + o.action.toUpperCase() + ' · ' + o.entity }),
+            el('p', { text: 'Usuario: ' + actorName(o.actor_uid) }), el('pre', { text: JSON.stringify(o.details || {}, null, 2) })
+          ]));
+          return;
+        }
+        var rs = e.rows, counts = {};
+        rs.forEach(function (r) { var k = r.table_name + ' · ' + r.operation; counts[k] = (counts[k] || 0) + 1; });
+        var summary = Object.keys(counts).map(function (k) { return k + ': ' + counts[k]; }).join(' · ');
+        content.appendChild(el('details', { class: 'card audit-item' }, [
+          el('summary', { text: deliveryPeriod(e.ts) + fmt.datetime(new Date(e.ts).getTime()) + ' · ' + (rs.length > 1 ? 'OPERACIÓN MASIVA · ' : '') + summary }),
+          rs.map(function (r) { return el('section', { class: 'audit-row' }, [
+            el('strong', { text: r.table_name + ' · ' + r.operation + ' · registro ' + JSON.stringify(r.record_id) }),
+            el('p', { text: 'Usuario: ' + actorName(r.actor_uid) + ' · Rol DB: ' + r.db_role + ' · Tx: ' + r.transaction_id }),
+            r.before_data ? el('div', {}, [el('h4', { text: 'ANTES' }), el('pre', { text: JSON.stringify(r.before_data, null, 2) })]) : null,
+            r.after_data ? el('div', {}, [el('h4', { text: 'DESPUÉS' }), el('pre', { text: JSON.stringify(r.after_data, null, 2) })]) : null
+          ]); })
+        ]));
+      });
+      if (auditDisplayLimit < entries.length) content.appendChild(el('button', { class: 'btn btn-ghost', text: 'Mostrar más eventos', onclick: function () { auditDisplayLimit += 150; renderRows(); } }));
+      else if (auditHasMore || auditOperationsHasMore) content.appendChild(el('button', { class: 'btn btn-ghost', text: auditLoadingMore ? 'Cargando…' : 'Cargar eventos anteriores', onclick: function () {
+        if (auditLoadingMore) return; auditLoadingMore = true;
+        App.data.fetchAudit(auditCache.rows.length, auditCache.operations.length).then(function (more) {
+          auditCache.rows = auditCache.rows.concat(more.rows); auditHasMore = more.rows.length === 500;
+          auditCache.operations = auditCache.operations.concat(more.operations); auditOperationsHasMore = more.operations.length === 500;
+          auditLoadingMore = false; auditDisplayLimit += 150; renderRows();
+        }).catch(function (e) { auditLoadingMore = false; auditError = e.message || 'No se pudieron cargar más eventos.'; renderRows(); });
+        renderRows();
+      } }));
+    }
+    filter.addEventListener('change', function () { auditDisplayLimit = 150; renderRows(); }); renderRows();
+    return [cfgSec('Auditoría', 'Registro de cambios por fila en PostgreSQL y eventos de importación/restauración de la aplicación.', [
+      cfgGroup([cfgRow('Filtrar eventos', 'La auditoría de base registra INSERT, UPDATE y DELETE con los datos completos.', filter),
+        cfgRow('Actualizar lista', null, el('button', { class: 'btn btn-ghost', type: 'button', text: 'Actualizar', onclick: function () { auditCache = null; auditError = ''; App.router.render(); } }))]),
+      auditError ? el('button', { class: 'btn btn-ghost', text: 'Reintentar', onclick: function () { auditCache = null; auditError = ''; App.router.render(); } }) : null,
+      content
     ])];
   }
 
@@ -1952,7 +2090,8 @@
               .then(function (ok) {
                 if (!ok) return;
                 try { ui.downloadFile('paginatoto-ANTES-DE-BORRAR-' + store.todayISO() + '.json', store.exportJSON(), 'application/json'); } catch (e) {}
-                setTimeout(function () { store.resetAll(); ui.toast('Datos borrados. Guardá el archivo que se descargó.'); App.router.go(''); }, 400);
+                store.resetAll().then(function () { ui.toast('Datos reiniciados. Se guardó una copia previa y el archivo descargado.', 'success'); App.router.go(''); })
+                  .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa; no se reinició el estado.', 'error'); });
               });
           } })])
         ])

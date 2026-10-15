@@ -2537,3 +2537,8 @@ a.w-row:hover { background: var(--c-sheet); }
 
 /* Riel: si el ícono cuadrado no carga, se muestra el logo horizontal embebido */
 @media (min-width: 761px) { .rail-mark img.is-wide { transform: none; object-fit: contain; padding: 0 4px; background: #000; } }
+
+.audit-item { margin: 10px 0; min-width: 0; }
+.audit-item > summary, .cfg-note > summary { cursor: pointer; font-weight: 650; }
+.audit-item pre, .cfg-note pre { max-width: 100%; max-height: 45vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; padding: 12px; border-radius: 8px; background: var(--c-surface-2); }
+.audit-row { border-top: 1px solid var(--c-border); margin-top: 12px; padding-top: 10px; min-width: 0; }

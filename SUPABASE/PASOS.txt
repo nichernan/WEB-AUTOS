@@ -66,3 +66,19 @@ Decime "listo el paso 5" y lo pruebo con vos: login, que se vea en tiempo
 real en dos computadoras, y que un usuario desactivado no pueda entrar.
 
 El link de Netlify de PaginaToto-WEB es el que usan todos.
+
+
+PASO 6 — Auditoría, recuperación y corte de entrega
+--------------------------------------------------
+En WebTotoAuto (wprhqjmhsqwncbhouxvl) están instaladas las migraciones:
+2-seguridad-y-recuperacion, 3-endurecer-permisos-auth y
+4-kv-generation-guard. No ejecutes de nuevo scripts de limpieza.
+
+El corte inicial vacío está descrito y protegido por guardas en
+5-entrega-inicial-vacia.sql. La aplicación conserva auditoría SQL, papelera,
+bitácora de operaciones y snapshots remotos; los navegadores invalidan el estado
+comercial local de una etapa anterior sin eliminar credenciales.
+
+Leé SUPABASE/SEGURIDAD-Y-RECUPERACION.md para el informe vigente y ejecutá las
+pruebas aisladas con PRUEBAS-SEGURIDAD-AISLADAS.ps1. Ese script crea y elimina
+únicamente un contenedor local descartable.

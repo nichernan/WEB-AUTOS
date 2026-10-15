@@ -22,6 +22,7 @@
       history: [],         // movimientos cronológicos { id, ts, fecha, tipo, vehicleId, titulo, detalle, monto, moneda, meta }
       reminders: [],       // recordatorios del calendario { id, titulo, fecha, hora, tipo, nota, repeat, doneDates, createdAt }
       fixedExpenses: [],   // gastos fijos del negocio { id, concepto, categoria, monto, moneda, cotizacionUSD, frecuencia, fecha, hasta, notas }
+      trash: [],            // elementos eliminados recuperables (independiente de la auditoría SQL)
       settings: {
         dolarActual: 1600,           // cotización actual (editable por el usuario, sólo para comparaciones)
         diasStockAlerta: 60,          // umbral de "muchos días en stock"
@@ -33,6 +34,7 @@
 
   var state = emptyState();
   var listeners = [];
+  var safetyBaseline = null;
 
   /* ----------------------------- Utilidades ------------------------------- */
   // id único sin depender de un contador compartido (importante para multi-usuario)
@@ -43,6 +45,12 @@
   function todayISO() {
     var d = new Date();
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function snapshotDayISO(date) {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date || new Date());
+    var p = {}; parts.forEach(function (x) { p[x.type] = x.value; });
+    return p.year + '-' + p.month + '-' + p.day;
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -64,7 +72,8 @@
       if (!raw) { state = emptyState(); save(); takeSnapshot(); return; }
       var parsed = JSON.parse(raw);
       state = migrate(parsed);
-      takeSnapshot();   // copia de seguridad interna (1 por día, últimas 5)
+      safetyBaseline = deepClone(state);
+      takeSnapshot();   // copia local diaria; las copias no se recortan por antigüedad
     } catch (err) {
       console.error('No se pudo cargar el estado, se inicia vacío:', err);
       state = emptyState();
@@ -73,20 +82,62 @@
 
   /* -------------------- Copias internas (anti "borré todo") ------------- */
   var SNAP_KEY = 'paginaToto:snapshots';
-  function takeSnapshot() {
+  function uniqueSnapshotTs(candidate, arr, data) {
+    arr = arr || JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+    var same = arr.filter(function (x) { return x.ts === candidate; })[0];
+    if (same && same.data === data) return candidate;
+    var max = arr.reduce(function (n, x) { return Math.max(n, Number(x.ts) || 0); }, 0);
+    candidate = Math.max(Number(candidate) || Date.now(), max + 1);
+    while (arr.some(function (x) { return x.ts === candidate; })) candidate++;
+    return candidate;
+  }
+  function takeSnapshot(label) {
     try {
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
-      var hoy = todayISO();
-      if (arr.length && arr[arr.length - 1].fecha === hoy) return;
-      arr.push({ ts: Date.now(), fecha: hoy, data: JSON.stringify(state) });
-      while (arr.length > 5) arr.shift();
+      var hoy = snapshotDayISO();
+      if (arr.some(function (x) { return x.etiqueta === (label || 'Estado completo') && x.fecha === hoy; })) return;
+      var data = JSON.stringify(state);
+      var snap = { ts: uniqueSnapshotTs(Date.now(), arr, data), fecha: hoy, etiqueta: label || 'Estado completo', data: data };
+      arr.push(snap);
       localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+      if (App.data && App.data.saveSnapshot) App.data.saveSnapshot(snap).catch(function (e) { console.warn('No se pudo guardar el punto de restauración remoto', e); });
     } catch (e) { /* si no entra en el almacenamiento, se ignora */ }
+  }
+  function createSnapshot(label, requireRemote) {
+    try {
+      var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+      var data = JSON.stringify(state);
+      var snap = { ts: uniqueSnapshotTs(Date.now(), arr, data), fecha: snapshotDayISO(), etiqueta: label || 'Estado completo', data: data };
+      arr.push(snap);
+      localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+      if (App.data && App.data.saveSnapshot) return App.data.saveSnapshot(snap).then(function () {
+        var log = App.data.logOperation ? App.data.logOperation('snapshot', 'estado_completo', summarizeState(state)) : Promise.resolve(false);
+        return Promise.resolve(log).then(function (logged) {
+          if (requireRemote && !logged) throw new Error('No se pudo registrar la creación del snapshot.');
+          return snap.ts;
+        });
+      }).catch(function (e) {
+        console.warn('Copia local creada; no pudo escribirse en Supabase', e);
+        if (requireRemote) throw e;
+        return snap.ts;
+      });
+      if (requireRemote) return Promise.reject(new Error('La capa de copias de Supabase todavía no está disponible.'));
+      return Promise.resolve(snap.ts);
+    } catch (e) { throw new Error('No hay espacio disponible para guardar una copia local.'); }
+  }
+  function cacheSnapshot(snap) {
+    var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
+    var same = arr.filter(function (x) { return x.ts === snap.ts; })[0];
+    if (same && same.data === snap.data) return same.ts;
+    var copy = deepClone(snap);
+    copy.ts = uniqueSnapshotTs(copy.ts, arr, copy.data);
+    arr.push(copy); localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+    return copy.ts;
   }
   function getSnapshots() {
     try {
       return JSON.parse(localStorage.getItem(SNAP_KEY) || '[]')
-        .map(function (s) { return { ts: s.ts, fecha: s.fecha, autos: (JSON.parse(s.data).vehicles || []).length }; })
+        .map(function (s) { return { ts: s.ts, fecha: s.fecha, etiqueta: s.etiqueta || 'Estado completo', autos: (JSON.parse(s.data).vehicles || []).length }; })
         .sort(function (a, b) { return b.ts - a.ts; });
     } catch (e) { return []; }
   }
@@ -95,10 +146,19 @@
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
       var s = arr.filter(function (x) { return x.ts === ts; })[0];
       if (!s) return false;
-      takeSnapshot();
-      state = migrate(JSON.parse(s.data));
-      emit();
-      return true;
+      var backup = createSnapshot('Estado anterior a restauración', requiresRemoteBackup());
+      var previousTrash = (state.trash || []).slice();
+      var targetState = migrate(JSON.parse(s.data));
+      return backup.then(function () {
+        var operation = App.data && App.data.logOperation ? App.data.logOperation('restauracion', 'snapshot', summarizeChange(state, targetState)) : Promise.resolve(false);
+        return Promise.resolve(operation).then(function (logged) {
+        if (requiresRemoteBackup() && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        state = targetState;
+        var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
+        previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
+        emit(); return true;
+        });
+      }).catch(function (e) { console.error('Restauración bloqueada porque no se guardó la copia previa', e); return false; });
     } catch (e) { return false; }
   }
   function markBackup() {
@@ -113,6 +173,7 @@
     // reemplaza la sincronización en sí.
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      safetyBaseline = deepClone(state);
     } catch (err) {
       console.error('No se pudo guardar el estado:', err);
       App.ui && App.ui.toast('No se guardaron los cambios en este dispositivo. Exportá una copia y liberá espacio.', 'error');
@@ -124,9 +185,11 @@
   // reemplaza el estado completo (usado por la sincronización con la nube). No guarda.
   function hydrate(newState) {
     state = migrate(newState || emptyState());
+    safetyBaseline = deepClone(state);
     listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
   function notify() {
+    safetyBaseline = deepClone(state);
     listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
 
@@ -138,6 +201,7 @@
     base.history = Array.isArray(parsed.history) ? parsed.history : [];
     base.reminders = Array.isArray(parsed.reminders) ? parsed.reminders : [];
     base.fixedExpenses = Array.isArray(parsed.fixedExpenses) ? parsed.fixedExpenses : [];
+    base.trash = Array.isArray(parsed.trash) ? parsed.trash : [];
     base.settings = Object.assign({}, base.settings, parsed.settings || {});
     base.meta = Object.assign({}, base.meta, parsed.meta || {});
     base.schema = SCHEMA_VERSION;
@@ -236,7 +300,37 @@
 
   /* ------------------------------ Listeners ------------------------------- */
   function subscribe(fn) { listeners.push(fn); return function () { listeners = listeners.filter(function (l) { return l !== fn; }); }; }
-  function emit() { save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } }); }
+  function remoteSafetyMissing() {
+    return !!(App.auth && App.auth.enabled && App.data && App.data.safetyAvailable && !App.data.safetyAvailable() && !(App.data.isOffline && App.data.isOffline()));
+  }
+  function deliveryGenerationMissing() {
+    return !!(App.auth && App.auth.enabled && App.data && App.data.deliveryReady && !App.data.deliveryReady());
+  }
+  function requiresRemoteBackup() {
+    return !!(App.auth && App.auth.enabled && !(App.data && App.data.isOffline && App.data.isOffline()));
+  }
+  function emit() {
+    if (remoteSafetyMissing() || deliveryGenerationMissing()) {
+      if (safetyBaseline) state = deepClone(safetyBaseline);
+      App.ui && App.ui.toast(deliveryGenerationMissing()
+        ? 'Cambios bloqueados hasta cargar la etapa comercial vigente desde Supabase.'
+        : 'Cambios bloqueados: aplicá primero la migración de auditoría y recuperación en Supabase.', 'error');
+      listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+      return;
+    }
+    save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+  }
+  function safetyReady(action) {
+    if (deliveryGenerationMissing()) {
+      App.ui && App.ui.toast('Esta acción queda bloqueada hasta cargar la etapa comercial vigente desde Supabase.', 'error');
+      return false;
+    }
+    if (remoteSafetyMissing()) {
+      App.ui && App.ui.toast('Esta acción está bloqueada hasta aplicar la migración SUPABASE/2-seguridad-y-recuperacion.sql.', 'error');
+      return false;
+    }
+    return true;
+  }
 
   /* --------------------------- Historial general ------------------------- */
   function logEvent(evt) {
@@ -331,26 +425,34 @@
   }
 
   function softDeleteVehicle(id) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(id);
     if (!v) return;
     v.deleted = true;
     v.deletedAt = Date.now();
+    addTrashEntry('vehicle', v.id, null, { vehicle: deepClone(v), history: deepClone(state.history.filter(function (h) { return h.vehicleId === id; })) }, 'Vehículo');
     logEvent({ tipo: 'papelera', vehicleId: v.id, titulo: 'Enviaste a papelera ' + vehicleName(v), detalle: 'El vehículo puede restaurarse desde la Papelera' });
     emit();
   }
 
   function restoreVehicle(id) {
+    if (!safetyReady('restaurar')) return;
     var v = getVehicle(id);
     if (!v) return;
     v.deleted = false;
     v.deletedAt = null;
+    markTrashRestored('vehicle', v.id);
     logEvent({ tipo: 'restaurar', vehicleId: v.id, titulo: 'Restauraste ' + vehicleName(v), detalle: 'El vehículo volvió al sistema' });
+    if (App.data && App.data.logOperation) App.data.logOperation('restauracion', 'vehicle', { entityId: id });
     emit();
   }
 
   function hardDeleteVehicle(id) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(id);
     if (!v) return;
+    var savedInTrash = (state.trash || []).some(function (x) { return x.entity === 'vehicle' && x.entityId === id && !x.restoredAt; });
+    if (!savedInTrash) addTrashEntry('vehicle', v.id, null, { vehicle: deepClone(v), history: deepClone(state.history.filter(function (h) { return h.vehicleId === id; })) }, 'Vehículo eliminado definitivamente');
     state.vehicles = state.vehicles.filter(function (x) { return x.id !== id; });
     // limpiar referencias de parte de pago (en ambos sentidos, para que ninguna
     // relación quede apuntando a un vehículo que ya no existe)
@@ -664,8 +766,12 @@
   }
 
   function removeExpense(vehicleId, expenseId) {
+    if (!safetyReady('eliminar')) return;
     var v = getVehicle(vehicleId);
     if (!v) return;
+    var removed = v.expenses.filter(function (x) { return x.id === expenseId; })[0];
+    if (!removed) return;
+    addTrashEntry('expense', removed.id, vehicleId, removed, 'Gasto de vehículo');
     v.expenses = v.expenses.filter(function (x) { return x.id !== expenseId; });
     v.updatedAt = Date.now();
     logEvent({ tipo: 'gasto', vehicleId: v.id, titulo: 'Eliminaste un gasto de ' + vehicleName(v), detalle: '' });
@@ -700,6 +806,9 @@
     return f;
   }
   function removeFixedExpense(id) {
+    if (!safetyReady('eliminar')) return;
+    var removed = getFixedExpense(id);
+    if (removed) addTrashEntry('fixed_expense', removed.id, null, removed, 'Gasto fijo');
     state.fixedExpenses = (state.fixedExpenses || []).filter(function (f) { return f.id !== id; });
     emit();
   }
@@ -747,26 +856,96 @@
     emit();
   }
   function removeReminder(id) {
+    if (!safetyReady('eliminar')) return;
+    var removed = getReminder(id);
+    if (removed) addTrashEntry('reminder', removed.id, null, removed, 'Recordatorio');
     state.reminders = (state.reminders || []).filter(function (r) { return r.id !== id; });
     emit();
+  }
+
+  function addTrashEntry(entity, entityId, parentId, data, label) {
+    if (!state.trash) state.trash = [];
+    state.trash.push({ id: uid('trash'), entity: entity, entityId: entityId, parentId: parentId,
+      label: label, deletedAt: Date.now(), deletedBy: App.auth && App.auth.profile ? App.auth.profile.id : null,
+      data: deepClone(data), restoredAt: null });
+  }
+  function markTrashRestored(entity, entityId) {
+    (state.trash || []).forEach(function (x) { if (x.entity === entity && x.entityId === entityId && !x.restoredAt) x.restoredAt = Date.now(); });
+  }
+  function getTrash() { return (state.trash || []).slice().filter(function (x) { return !x.restoredAt; }).sort(function (a, b) { return b.deletedAt - a.deletedAt; }); }
+  function allTrash() { return (state.trash || []).slice().sort(function (a, b) { return b.deletedAt - a.deletedAt; }); }
+  function restoreTrash(id) {
+    if (!safetyReady('restaurar')) return false;
+    var item = (state.trash || []).filter(function (x) { return x.id === id && !x.restoredAt; })[0];
+    if (!item) return false;
+    var now = Date.now();
+    if (item.entity === 'vehicle') {
+      var saved = item.data && item.data.vehicle ? item.data : { vehicle: item.data, history: [] };
+      var existing = getVehicle(item.entityId);
+      if (existing) { existing.deleted = false; existing.deletedAt = null; }
+      else { var restoredVehicle = deepClone(saved.vehicle); restoredVehicle.deleted = false; restoredVehicle.deletedAt = null; state.vehicles.push(restoredVehicle); }
+      (saved.history || []).forEach(function (h) { if (!getEvent(h.id)) state.history.push(h); });
+    } else if (item.entity === 'expense') {
+      var parent = getVehicle(item.parentId); if (!parent) return false;
+      if (!parent.expenses.some(function (x) { return x.id === item.entityId; })) parent.expenses.push(item.data);
+    } else if (item.entity === 'fixed_expense') {
+      if (!getFixedExpense(item.entityId)) state.fixedExpenses.push(item.data);
+    } else if (item.entity === 'reminder') {
+      if (!getReminder(item.entityId)) state.reminders.push(item.data);
+    } else return false;
+    item.restoredAt = now;
+    if (App.data && App.data.logOperation) App.data.logOperation('restauracion', item.entity, { trashId: item.id, entityId: item.entityId });
+    emit(); return true;
   }
 
   /* ------------------------- Import / Export / Reset ------------------- */
   function exportJSON() { return JSON.stringify(state, null, 2); }
   function importJSON(text) {
     var parsed = JSON.parse(text);
-    takeSnapshot();
-    state = migrate(parsed);
-    emit();
+    var imported = migrate(parsed);
+    var requireRemote = requiresRemoteBackup();
+    return createSnapshot('Estado anterior a importación', requireRemote).then(function () {
+      var operation = App.data && App.data.logOperation ? App.data.logOperation('importacion', 'estado_completo', summarizeChange(state, imported)) : Promise.resolve(false);
+      return Promise.resolve(operation).then(function (logged) {
+      if (requireRemote && !logged) throw new Error('No se pudo registrar la importación; no se reemplazaron los datos.');
+      var previousTrash = (state.trash || []).slice();
+      state = imported;
+      var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
+      previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
+      emit();
+      });
+    });
   }
   function resetAll() {
-    takeSnapshot();
-    state = emptyState();
-    emit();
+    var requireRemote = requiresRemoteBackup();
+    return createSnapshot('Estado anterior a reset', requireRemote).then(function () {
+      var operation = App.data && App.data.logOperation ? App.data.logOperation('reinicio', 'estado_completo', summarizeChange(state, emptyState())) : Promise.resolve(false);
+      return Promise.resolve(operation).then(function (logged) {
+      if (requireRemote && !logged) throw new Error('No se pudo registrar el reinicio; no se reemplazaron los datos.');
+      var previousTrash = (state.trash || []).slice();
+      state = emptyState();
+      state.trash = previousTrash;
+      emit();
+      });
+    });
   }
 
   /* ------------------------------- Getters ----------------------------- */
   function getState() { return state; }
+  function summarizeState(s) { return { vehicles: (s.vehicles || []).length, history: (s.history || []).length, reminders: (s.reminders || []).length, fixed_expenses: (s.fixedExpenses || []).length }; }
+  function summarizeChange(before, after) {
+    var result = { before: summarizeState(before), after: summarizeState(after), changes: {} };
+    [['vehicles','vehicles'],['history','history'],['reminders','reminders'],['fixed_expenses','fixedExpenses']].forEach(function (p) {
+      var old = {}, cur = {};
+      (before[p[1]] || []).forEach(function (x) { old[x.id] = x; });
+      (after[p[1]] || []).forEach(function (x) { cur[x.id] = x; });
+      var insert = 0, update = 0, del = 0;
+      Object.keys(cur).forEach(function (id) { if (!old[id]) insert++; else if (JSON.stringify(old[id]) !== JSON.stringify(cur[id])) update++; });
+      Object.keys(old).forEach(function (id) { if (!cur[id]) del++; });
+      result.changes[p[0]] = { INSERT: insert, UPDATE: update, DELETE: del };
+    });
+    return result;
+  }
   function getVehicle(id) { return state.vehicles.filter(function (v) { return v.id === id; })[0] || null; }
   function activeVehicles() { return state.vehicles.filter(function (v) { return !v.deleted; }); }
   function trashedVehicles() { return state.vehicles.filter(function (v) { return v.deleted; }); }
@@ -821,6 +1000,7 @@
     getState: getState, getVehicle: getVehicle,
     activeVehicles: activeVehicles, trashedVehicles: trashedVehicles,
     getHistory: getHistory, getEvent: getEvent,
+    getTrash: getTrash, allTrash: allTrash, restoreTrash: restoreTrash,
     createVehicle: createVehicle, updateVehicle: updateVehicle,
     softDeleteVehicle: softDeleteVehicle, restoreVehicle: restoreVehicle, hardDeleteVehicle: hardDeleteVehicle,
     setPurchase: setPurchase, pagarCuota: pagarCuota, desmarcarCuota: desmarcarCuota,
@@ -834,7 +1014,7 @@
     updateReminder: updateReminder, toggleReminderOccurrence: toggleReminderOccurrence, removeReminder: removeReminder,
     updateSettings: updateSettings,
     exportJSON: exportJSON, importJSON: importJSON, resetAll: resetAll,
-    markBackup: markBackup, takeSnapshot: takeSnapshot, getSnapshots: getSnapshots, restoreSnapshot: restoreSnapshot,
+    markBackup: markBackup, takeSnapshot: takeSnapshot, createSnapshot: createSnapshot, cacheSnapshot: cacheSnapshot, getSnapshots: getSnapshots, restoreSnapshot: restoreSnapshot,
     logEvent: function (e) { logEvent(e); emit(); },
     // helpers
     uid: uid, todayISO: todayISO, num: num,
