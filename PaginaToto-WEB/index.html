@@ -2724,13 +2724,17 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
       var s = arr.filter(function (x) { return x.ts === ts; })[0];
       if (!s) return false;
-      var backup = createSnapshot('Estado anterior a restauración', requiresRemoteBackup());
+      var requireRemote = requiresRemoteBackup();
+      var backup = createSnapshot('Estado anterior a restauración', requireRemote);
       var previousTrash = (state.trash || []).slice();
       var targetState = migrate(JSON.parse(s.data));
       return backup.then(function () {
         var operation = App.data && App.data.logOperation ? App.data.logOperation('restauracion', 'snapshot', summarizeChange(state, targetState)) : Promise.resolve(false);
         return Promise.resolve(operation).then(function (logged) {
-        if (requiresRemoteBackup() && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        if (requireRemote && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('restauracion', requireRemote, state)) {
+          throw new Error('No se pudo conservar la restauración pendiente de sincronización.');
+        }
         state = targetState;
         var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
         previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
@@ -3486,6 +3490,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var operation = App.data && App.data.logOperation ? App.data.logOperation('importacion', 'estado_completo', summarizeChange(state, imported)) : Promise.resolve(false);
       return Promise.resolve(operation).then(function (logged) {
       if (requireRemote && !logged) throw new Error('No se pudo registrar la importación; no se reemplazaron los datos.');
+      if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('importacion', requireRemote, state)) {
+        throw new Error('No se pudo conservar la importación pendiente de sincronización.');
+      }
       var previousTrash = (state.trash || []).slice();
       state = imported;
       var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
@@ -3500,6 +3507,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var operation = App.data && App.data.logOperation ? App.data.logOperation('reinicio', 'estado_completo', summarizeChange(state, emptyState())) : Promise.resolve(false);
       return Promise.resolve(operation).then(function (logged) {
       if (requireRemote && !logged) throw new Error('No se pudo registrar el reinicio; no se reemplazaron los datos.');
+      if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('reset', requireRemote, state)) {
+        throw new Error('No se pudo conservar el reset pendiente de sincronización.');
+      }
       var previousTrash = (state.trash || []).slice();
       state = emptyState();
       state.trash = previousTrash;
@@ -5863,6 +5873,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var BASE_KEY = 'paginaToto:syncBase';
   var GENERATION_KEY = 'paginaToto:businessGeneration';
   var PENDING_MASS_KEY = 'paginaToto:pendingMassSync';
+  var PENDING_BULK_KEY = 'paginaToto:pendingBulkOperation';
+  var MIN_BULK_EXISTING_UPDATES = 5;
   var businessGeneration = null;
   var generationReady = false;
   var deliveryLabel = null;
@@ -5874,6 +5886,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var deletionApprovalPending = false;
   var approvedMassChangeFingerprint = null;
   var pendingMassSync = null;
+  var pendingBulkOperation = null;
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function j(o) { return JSON.stringify(o); }
@@ -5916,13 +5929,20 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
           localStorage.removeItem(BASE_KEY);
           localStorage.removeItem('paginaToto:snapshots');
           localStorage.removeItem(PENDING_MASS_KEY);
+          localStorage.removeItem(PENDING_BULK_KEY);
           localStorage.setItem(GENERATION_KEY, businessGeneration);
           pendingMassSync = null;
+          pendingBulkOperation = null;
         } catch (e) { throw new Error('No se pudo invalidar el estado comercial local anterior.'); }
       } else {
         pendingMassSync = readPendingMassSync();
+        pendingBulkOperation = readPendingBulkOperation();
+        if (!pendingBulkOperation && pendingMassSync && pendingMassSync.bulkOperation) pendingBulkOperation = pendingMassSync.bulkOperation;
         if (pendingMassSync && pendingMassSync.generation !== businessGeneration) {
           clearPendingMassSync();
+        }
+        if (pendingBulkOperation && pendingBulkOperation.generation !== businessGeneration) {
+          clearPendingBulkOperation();
         }
       }
       return Promise.all([
@@ -5955,13 +5975,23 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       var cloudState = clone(remote);
       var local = null;
       try { local = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null'); } catch (e) {}
+      var pendingRebased = false;
       if (pendingMassSync && pendingMassSync.state) {
-        // Un lote que el usuario canceló no se descarta al volver a cargar la app.
-        // Queda visible localmente y seguirá requiriendo una confirmación explícita.
-        // El estado local puede incluir ediciones offline posteriores a la
-        // cancelación; en ese caso se conserva el estado más reciente.
-        st = clone(local && Array.isArray(local.vehicles) ? local : pendingMassSync.state);
+        // Reaplicar sobre la descarga remota más reciente los cambios que se
+        // cancelaron. Así una confirmación posterior no pisa ediciones remotas
+        // llegadas mientras el lote estaba pendiente.
+        var pendingLocal = local && Array.isArray(local.vehicles) ? local : pendingMassSync.state;
+        var pendingBase = pendingMassSync.base || readBaseState() || cloudState;
+        st = mergeOfflineChanges(clone(remote), pendingLocal, pendingBase);
         local = st;
+        pendingRebased = true;
+        try { localStorage.setItem(store.STORAGE_KEY, JSON.stringify(st)); } catch (e) {}
+      } else if (pendingBulkOperation && (pendingBulkOperation.state || (local && Array.isArray(local.vehicles)))) {
+        var bulkLocal = pendingBulkOperation.state || local;
+        var bulkBase = pendingBulkOperation.base || readBaseState() || cloudState;
+        st = mergeOfflineChanges(clone(remote), bulkLocal, bulkBase);
+        local = st;
+        pendingRebased = true;
         try { localStorage.setItem(store.STORAGE_KEY, JSON.stringify(st)); } catch (e) {}
       }
       if (local && Array.isArray(local.trash)) {
@@ -5972,7 +6002,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
           else if (!current.restoredAt && x.restoredAt) { current.restoredAt = x.restoredAt; }
         });
       }
-      if (offlineMode && local) st = mergeOfflineChanges(remote, local);
+      if (offlineMode && local && !pendingRebased) st = mergeOfflineChanges(remote, local);
 
       // Nunca importar automáticamente localStorage hacia una etapa ya inicializada.
       pendingMigration = null;
@@ -6061,6 +6091,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   /* ------------------------ guardar (diff + subir) ------------------- */
   function onLocalChange(state) {
     if (applyingRemote) return;
+    if (pendingBulkOperation) persistPendingBulkState(state);
     if (!navigator.onLine || offlineMode) { offlineMode = true; return; }
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { flush(state); }, 400);
@@ -6084,19 +6115,29 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   }
 
   function readPendingMassSync() {
-    try {
-      var pending = JSON.parse(localStorage.getItem(PENDING_MASS_KEY) || 'null');
-      if (!pending || !pending.state || !pending.generation) return null;
-      return pending;
-    } catch (e) { return null; }
+    var raw = localStorage.getItem(PENDING_MASS_KEY);
+    if (!raw) return null;
+    var pending;
+    try { pending = JSON.parse(raw); } catch (e) { throw new Error('Hay una sincronización pendiente local dañada; se bloqueó la carga para no perder cambios.'); }
+    if (!pending || !pending.state || !pending.generation) throw new Error('Hay una sincronización pendiente local incompleta; se bloqueó la carga para no perder cambios.');
+    return pending;
+  }
+  function readPendingBulkOperation() {
+    var raw = localStorage.getItem(PENDING_BULK_KEY);
+    if (!raw) return null;
+    var pending;
+    try { pending = JSON.parse(raw); } catch (e) { throw new Error('Hay una operación masiva pendiente local dañada; se bloqueó la carga para no perder cambios.'); }
+    if (!pending || !pending.kind || !pending.generation) throw new Error('Hay una operación masiva pendiente local incompleta; se bloqueó la carga para no perder cambios.');
+    return pending;
   }
   function persistPendingMassSync(state, fingerprint, riskByTable) {
     var pending = { generation: businessGeneration, createdAt: Date.now(), fingerprint: fingerprint,
-      risks: riskByTable, state: clone(state) };
+      risks: riskByTable, state: clone(state), base: clone(shadow), bulkOperation: pendingBulkOperation ? clone(pendingBulkOperation) : null };
     try {
       localStorage.setItem(PENDING_MASS_KEY, JSON.stringify(pending));
       localStorage.setItem(store.STORAGE_KEY, JSON.stringify(state));
       pendingMassSync = pending;
+      if (pendingBulkOperation) localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation));
       return true;
     } catch (e) {
       console.error('No se pudo conservar localmente la sincronización pendiente', e);
@@ -6106,6 +6147,24 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   function clearPendingMassSync() {
     pendingMassSync = null;
     try { localStorage.removeItem(PENDING_MASS_KEY); } catch (e) {}
+  }
+  function clearPendingBulkOperation() {
+    pendingBulkOperation = null;
+    try { localStorage.removeItem(PENDING_BULK_KEY); } catch (e) {}
+  }
+  function markBulkOperation(kind, preBackedUp, beforeState) {
+    if (!generationReady || !businessGeneration) return false;
+    pendingBulkOperation = { kind: String(kind || 'operacion_masiva'), generation: businessGeneration,
+      createdAt: Date.now(), preBackedUp: preBackedUp === true && !!beforeState && j(beforeState) === j(shadow),
+      state: null, base: clone(shadow || store.blankState()) };
+    try { localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation)); return true; }
+    catch (e) { pendingBulkOperation = null; return false; }
+  }
+  function persistPendingBulkState(state) {
+    if (!pendingBulkOperation) return true;
+    pendingBulkOperation.state = clone(state);
+    try { localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation)); return true; }
+    catch (e) { console.error('No se pudo guardar el estado de la operación masiva pendiente', e); return false; }
   }
 
   function flush(state) {
@@ -6120,12 +6179,15 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     diffArr('fixed_expenses', state.fixedExpenses, shadow.fixedExpenses, ops);
     if (j(state.settings) !== j(shadow.settings)) ops.up.kv.push({ k: 'settings', data: state.settings, generation: businessGeneration });
     if (j(state.meta) !== j(shadow.meta)) ops.up.kv.push({ k: 'meta', data: state.meta, generation: businessGeneration });
+    if (ops.up.kv.length) ops.metrics.kv = { insert: 0, update: ops.up.kv.length, delete: 0 };
 
     var riskByTable = [];
-    ['vehicles','history','reminders','fixed_expenses'].forEach(function (t) {
-      var previous = t === 'vehicles' ? shadow.vehicles.length : t === 'history' ? shadow.history.length :
-        t === 'reminders' ? shadow.reminders.length : shadow.fixedExpenses.length;
+    var totalPrevious = 0, totalUpdates = 0;
+    ['vehicles','history','reminders','fixed_expenses','kv'].forEach(function (t) {
+      var previous = t === 'kv' ? 2 : (shadow[ARR[t]] || []).length;
       var metric = ops.metrics[t] || { insert: 0, update: 0, delete: 0 };
+      totalPrevious += previous;
+      totalUpdates += metric.update;
       // Un único DELETE ya tiene su confirmación normal en la interfaz. La
       // barrera adicional es para lotes: exige al menos dos filas y combina
       // cantidad absoluta con proporción, evitando clasificar un UPDATE 1/1
@@ -6134,28 +6196,27 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       if (metric.delete >= deleteThreshold && previous > 0) {
         riskByTable.push({ table: t, action: 'DELETE', count: metric.delete, ids: ops.del[t].slice().sort() });
       }
-      var upsertCount = metric.insert + metric.update;
-      // Mantener el mínimo absoluto de 3 para altas nuevas; para cambios sobre
-      // conjuntos pequeños exigir al menos dos filas, aunque sean el 100%.
-      var upsertThreshold = previous <= 3
-        ? (previous === 0 ? 3 : 2)
-        : Math.max(3, Math.ceil(previous * 0.5));
-      var broadUpsert = upsertCount >= upsertThreshold;
-      if (upsertCount > 0 && broadUpsert) {
-        riskByTable.push({ table: t, action: 'UPSERT', count: upsertCount, ids: ops.up[t].map(function (x) { return x.id; }).sort() });
-      }
-      var replacementCount = metric.delete + metric.insert;
-      var replacementThreshold = previous <= 3 ? 2 : Math.max(3, Math.ceil(previous * 0.5));
-      if (metric.delete > 0 && metric.insert > 0 && replacementCount >= replacementThreshold &&
-          !riskByTable.some(function (x) { return x.table === t && x.action === 'DELETE'; })) {
-        riskByTable.push({ table: t, action: 'REEMPLAZO', count: replacementCount,
-          ids: ops.del[t].concat(ops.up[t].map(function (x) { return x.id; })).sort() });
+      // Los INSERT son aditivos (incluidos movimientos de historial que una
+      // operación comercial puede crear en pareja) y por sí solos no
+      // sobrescriben el estado remoto. Para UPDATE exigir un lote absoluto y
+      // una fracción significativa; importación/restauración/reset se cubren
+      // por intención explícita, incluso en colecciones de 1 o 2 filas.
+      var updateThreshold = Math.max(MIN_BULK_EXISTING_UPDATES, Math.ceil(previous * 0.5));
+      if (metric.update >= updateThreshold) {
+        var ids = t === 'kv' ? ops.up.kv.map(function (x) { return x.k; }) :
+          ops.up[t].filter(function (x) { return !!(shadow[ARR[t]] || []).some(function (old) { return old.id === x.id; }); }).map(function (x) { return x.id; });
+        riskByTable.push({ table: t, action: 'UPDATE', count: metric.update,
+          ids: ids.sort() });
       }
     });
+    var totalUpdateThreshold = Math.max(MIN_BULK_EXISTING_UPDATES, Math.ceil(totalPrevious * 0.5));
+    if (totalUpdates >= totalUpdateThreshold && !riskByTable.some(function (x) { return x.action === 'UPDATE'; })) {
+      riskByTable.push({ table: 'varias tablas', action: 'UPDATE', count: totalUpdates, ids: [] });
+    }
     // Incluye el contenido efectivo, no solo los IDs: una aprobación previa
     // nunca debe autorizar otra versión del mismo lote.
-    var fingerprint = j({ risks: riskByTable, up: ops.up, del: ops.del });
-    var requiresApproval = riskByTable.length > 0 || !!pendingMassSync;
+    var fingerprint = j({ risks: riskByTable, up: ops.up, del: ops.del, bulkOperation: pendingBulkOperation });
+    var requiresApproval = riskByTable.length > 0 || !!pendingMassSync || !!pendingBulkOperation;
     if (requiresApproval && deletionApprovalPending) return Promise.resolve(false);
     if (requiresApproval && approvedMassChangeFingerprint !== fingerprint && !deletionApprovalPending) {
       if (!persistPendingMassSync(state, fingerprint, riskByTable)) {
@@ -6166,10 +6227,16 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       deletionApprovalPending = true;
       var riskDescription = riskByTable.length
         ? riskByTable.map(function (x) { return x.action + ' ' + x.count + ' en ' + x.table; }).join(', ')
-        : 'cambios pendientes que antes fueron cancelados';
-      return App.ui.confirm({ title: riskByTable.length ? 'Cambios grandes de sincronización' : 'Sincronización pendiente',
-        message: 'La sincronización contiene ' + riskDescription +
-          '. Si confirmás, se guardará primero una copia del estado remoto y se registrará la operación. Si cancelás, los cambios quedarán guardados localmente y no se enviarán.', danger: true, confirmText: 'Confirmar sincronización' })
+        : pendingBulkOperation
+          ? 'operación de estado completo: ' + pendingBulkOperation.kind
+          : 'cambios pendientes que antes fueron cancelados';
+      if (pendingBulkOperation && riskByTable.length) riskDescription += ' · operación: ' + pendingBulkOperation.kind;
+      var needsRemoteBackup = !(pendingBulkOperation && pendingBulkOperation.preBackedUp);
+      var safetyDescription = needsRemoteBackup
+        ? 'Al confirmar, se guardará primero una copia del estado remoto y se registrará la operación.'
+        : 'Ya existe una copia previa y la operación está registrada. Al confirmar, se sincronizarán los cambios.';
+      return App.ui.confirm({ title: riskByTable.length || pendingBulkOperation ? 'Cambios grandes de sincronización' : 'Sincronización pendiente',
+        message: 'La sincronización contiene ' + riskDescription + '. ' + safetyDescription + ' Si cancelás, los cambios quedarán guardados localmente y no se enviarán.', danger: true, confirmText: 'Confirmar sincronización' })
         .then(function (ok) {
           deletionApprovalPending = false;
           if (!ok) {
@@ -6177,14 +6244,18 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
             App.ui.toast('Cambios conservados en este dispositivo; no se enviaron a Supabase.', 'error');
             return false;
           }
-          return saveSnapshotState(shadow, 'Estado anterior a operación masiva', 'safety').then(function () {
+          var existingBackup = pendingBulkOperation && pendingBulkOperation.preBackedUp;
+          var backup = existingBackup ? Promise.resolve() : saveSnapshotState(shadow, 'Estado anterior a operación masiva', 'safety');
+          return backup.then(function () {
             var details = { tables: {} };
-            riskByTable.forEach(function (risk) {
-              var m = ops.metrics[risk.table] || { insert: 0, update: 0, delete: 0 };
-              details.tables[risk.table] = { INSERT: m.insert, UPDATE: m.update, DELETE: m.delete };
+            Object.keys(ops.metrics).forEach(function (table) {
+              var m = ops.metrics[table];
+              details.tables[table] = { INSERT: m.insert, UPDATE: m.update, DELETE: m.delete };
             });
+            details.totalUpdates = totalUpdates;
             if (!riskByTable.length) details.pendingRetry = true;
-            return logOperation('operacion_masiva', 'sincronizacion', details);
+            if (pendingBulkOperation) details.bulkOperation = pendingBulkOperation.kind;
+            return existingBackup ? true : logOperation('operacion_masiva', 'sincronizacion', details);
           }).then(function (logged) {
             if (!logged) throw new Error('No se pudo registrar la operación masiva.');
             approvedMassChangeFingerprint = fingerprint;
@@ -6206,7 +6277,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
     if (!promises.length) {
-      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
+      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
         console.error('sync safety flush', e); offlineMode = true;
         App.ui && App.ui.toast('No se pudo guardar la papelera en la nube. Revisá internet.', 'error');
         if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(reconnect, 8000);
@@ -6223,6 +6294,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       shadow = clone(state);
       saveBase(state);
       clearPendingMassSync();
+      clearPendingBulkOperation();
       return ensureCloudDailySnapshot(state).then(function () { return true; });
     }).catch(function (e) {
       console.error('sync flush', e);
@@ -6325,9 +6397,11 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   // Aplicar solamente las diferencias locales posteriores a la última base
   // conocida sobre la descarga actual evita descartar trabajo offline.
-  function mergeOfflineChanges(remote, local) {
-    var base = null;
-    try { base = JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) {}
+  function readBaseState() {
+    try { return JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function mergeOfflineChanges(remote, local, baseOverride) {
+    var base = baseOverride || readBaseState();
     if (!base) base = store.blankState();
     var pairs = [
       ['vehicles', base.vehicles, local.vehicles], ['history', base.history, local.history],
@@ -6345,7 +6419,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
             ? mergeRecord(before[id], after[id], byId[id]) : after[id];
         }
       });
-      Object.keys(after).forEach(function (id) { if (!before[id]) byId[id] = after[id]; });
+      Object.keys(after).forEach(function (id) {
+        if (!before[id] && !Object.prototype.hasOwnProperty.call(byId, id)) byId[id] = after[id];
+      });
       remote[key] = Object.keys(byId).map(function (id) { return byId[id]; });
     });
     ['settings', 'meta'].forEach(function (key) {
@@ -6448,13 +6524,20 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
           localStorage.removeItem(store.STORAGE_KEY);
           localStorage.removeItem(BASE_KEY);
           localStorage.removeItem('paginaToto:snapshots');
+          localStorage.removeItem(PENDING_MASS_KEY);
+          localStorage.removeItem(PENDING_BULK_KEY);
         } catch (e) {}
+        pendingMassSync = null;
+        pendingBulkOperation = null;
         generationReady = false;
         store.hydrate(store.blankState());
         App.ui && App.ui.toast('Estado local anterior descartado. Conectate para cargar la etapa comercial vigente.', 'error');
       } else {
         businessGeneration = localGeneration;
         generationReady = true;
+        pendingMassSync = readPendingMassSync();
+        pendingBulkOperation = readPendingBulkOperation();
+        if (!pendingBulkOperation && pendingMassSync && pendingMassSync.bulkOperation) pendingBulkOperation = pendingMassSync.bulkOperation;
         store.load();
       }
       offlineMode = true;
@@ -6477,7 +6560,8 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     fetchSnapshotDetails: fetchSnapshotDetails,
     saveSnapshot: saveSnapshot,
     restoreRemoteSnapshot: restoreRemoteSnapshot,
-    logOperation: logOperation
+    logOperation: logOperation,
+    markBulkOperation: markBulkOperation
   };
 })();
 </script>

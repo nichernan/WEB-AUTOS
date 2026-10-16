@@ -34,6 +34,6 @@ for (const target of ['PaginaToto-WEB/index.html', 'PaginaToto.html']) {
 
 const sourceIndex = path.join(root, 'PaginaToto-CODIGO-FUENTE', 'index.html');
 let index = fs.readFileSync(sourceIndex, 'utf8');
-index = index.replace(/(js\/(?:store|sync|views2)\.js\?v=)19/g, '$1' + '20');
+index = index.replace(/(js\/(?:store|sync|views2)\.js\?v=)(\d+)/g, (_, prefix, version) => prefix + (Number(version) + 1));
 fs.writeFileSync(sourceIndex, index, 'utf8');
 console.log('Versiones de caché actualizadas para store.js, sync.js y views2.js.');

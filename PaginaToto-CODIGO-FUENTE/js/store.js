@@ -146,13 +146,17 @@
       var arr = JSON.parse(localStorage.getItem(SNAP_KEY) || '[]');
       var s = arr.filter(function (x) { return x.ts === ts; })[0];
       if (!s) return false;
-      var backup = createSnapshot('Estado anterior a restauración', requiresRemoteBackup());
+      var requireRemote = requiresRemoteBackup();
+      var backup = createSnapshot('Estado anterior a restauración', requireRemote);
       var previousTrash = (state.trash || []).slice();
       var targetState = migrate(JSON.parse(s.data));
       return backup.then(function () {
         var operation = App.data && App.data.logOperation ? App.data.logOperation('restauracion', 'snapshot', summarizeChange(state, targetState)) : Promise.resolve(false);
         return Promise.resolve(operation).then(function (logged) {
-        if (requiresRemoteBackup() && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        if (requireRemote && !logged) throw new Error('No se pudo registrar la restauración en la auditoría de la aplicación.');
+        if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('restauracion', requireRemote, state)) {
+          throw new Error('No se pudo conservar la restauración pendiente de sincronización.');
+        }
         state = targetState;
         var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
         previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
@@ -908,6 +912,9 @@
       var operation = App.data && App.data.logOperation ? App.data.logOperation('importacion', 'estado_completo', summarizeChange(state, imported)) : Promise.resolve(false);
       return Promise.resolve(operation).then(function (logged) {
       if (requireRemote && !logged) throw new Error('No se pudo registrar la importación; no se reemplazaron los datos.');
+      if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('importacion', requireRemote, state)) {
+        throw new Error('No se pudo conservar la importación pendiente de sincronización.');
+      }
       var previousTrash = (state.trash || []).slice();
       state = imported;
       var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
@@ -922,6 +929,9 @@
       var operation = App.data && App.data.logOperation ? App.data.logOperation('reinicio', 'estado_completo', summarizeChange(state, emptyState())) : Promise.resolve(false);
       return Promise.resolve(operation).then(function (logged) {
       if (requireRemote && !logged) throw new Error('No se pudo registrar el reinicio; no se reemplazaron los datos.');
+      if (App.data && App.data.markBulkOperation && !App.data.markBulkOperation('reset', requireRemote, state)) {
+        throw new Error('No se pudo conservar el reset pendiente de sincronización.');
+      }
       var previousTrash = (state.trash || []).slice();
       state = emptyState();
       state.trash = previousTrash;

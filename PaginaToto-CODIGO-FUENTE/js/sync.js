@@ -20,6 +20,8 @@
   var BASE_KEY = 'paginaToto:syncBase';
   var GENERATION_KEY = 'paginaToto:businessGeneration';
   var PENDING_MASS_KEY = 'paginaToto:pendingMassSync';
+  var PENDING_BULK_KEY = 'paginaToto:pendingBulkOperation';
+  var MIN_BULK_EXISTING_UPDATES = 5;
   var businessGeneration = null;
   var generationReady = false;
   var deliveryLabel = null;
@@ -31,6 +33,7 @@
   var deletionApprovalPending = false;
   var approvedMassChangeFingerprint = null;
   var pendingMassSync = null;
+  var pendingBulkOperation = null;
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function j(o) { return JSON.stringify(o); }
@@ -73,13 +76,20 @@
           localStorage.removeItem(BASE_KEY);
           localStorage.removeItem('paginaToto:snapshots');
           localStorage.removeItem(PENDING_MASS_KEY);
+          localStorage.removeItem(PENDING_BULK_KEY);
           localStorage.setItem(GENERATION_KEY, businessGeneration);
           pendingMassSync = null;
+          pendingBulkOperation = null;
         } catch (e) { throw new Error('No se pudo invalidar el estado comercial local anterior.'); }
       } else {
         pendingMassSync = readPendingMassSync();
+        pendingBulkOperation = readPendingBulkOperation();
+        if (!pendingBulkOperation && pendingMassSync && pendingMassSync.bulkOperation) pendingBulkOperation = pendingMassSync.bulkOperation;
         if (pendingMassSync && pendingMassSync.generation !== businessGeneration) {
           clearPendingMassSync();
+        }
+        if (pendingBulkOperation && pendingBulkOperation.generation !== businessGeneration) {
+          clearPendingBulkOperation();
         }
       }
       return Promise.all([
@@ -112,13 +122,23 @@
       var cloudState = clone(remote);
       var local = null;
       try { local = JSON.parse(localStorage.getItem(store.STORAGE_KEY) || 'null'); } catch (e) {}
+      var pendingRebased = false;
       if (pendingMassSync && pendingMassSync.state) {
-        // Un lote que el usuario canceló no se descarta al volver a cargar la app.
-        // Queda visible localmente y seguirá requiriendo una confirmación explícita.
-        // El estado local puede incluir ediciones offline posteriores a la
-        // cancelación; en ese caso se conserva el estado más reciente.
-        st = clone(local && Array.isArray(local.vehicles) ? local : pendingMassSync.state);
+        // Reaplicar sobre la descarga remota más reciente los cambios que se
+        // cancelaron. Así una confirmación posterior no pisa ediciones remotas
+        // llegadas mientras el lote estaba pendiente.
+        var pendingLocal = local && Array.isArray(local.vehicles) ? local : pendingMassSync.state;
+        var pendingBase = pendingMassSync.base || readBaseState() || cloudState;
+        st = mergeOfflineChanges(clone(remote), pendingLocal, pendingBase);
         local = st;
+        pendingRebased = true;
+        try { localStorage.setItem(store.STORAGE_KEY, JSON.stringify(st)); } catch (e) {}
+      } else if (pendingBulkOperation && (pendingBulkOperation.state || (local && Array.isArray(local.vehicles)))) {
+        var bulkLocal = pendingBulkOperation.state || local;
+        var bulkBase = pendingBulkOperation.base || readBaseState() || cloudState;
+        st = mergeOfflineChanges(clone(remote), bulkLocal, bulkBase);
+        local = st;
+        pendingRebased = true;
         try { localStorage.setItem(store.STORAGE_KEY, JSON.stringify(st)); } catch (e) {}
       }
       if (local && Array.isArray(local.trash)) {
@@ -129,7 +149,7 @@
           else if (!current.restoredAt && x.restoredAt) { current.restoredAt = x.restoredAt; }
         });
       }
-      if (offlineMode && local) st = mergeOfflineChanges(remote, local);
+      if (offlineMode && local && !pendingRebased) st = mergeOfflineChanges(remote, local);
 
       // Nunca importar automáticamente localStorage hacia una etapa ya inicializada.
       pendingMigration = null;
@@ -174,39 +194,46 @@
 
   function onRemote(table, payload) {
     var st = store.getState();
+    var remoteState = clone(shadow || st);
     applyingRemote = true;
     try {
       if (table === 'app_trash') {
-        var rows = st.trash || (st.trash = []), row = payload.new || payload.old;
+        var row = payload.new || payload.old;
         if (row.generation && row.generation !== businessGeneration) return;
-        var idx = rows.findIndex(function (x) { return x.id === row.id; });
-        if (payload.eventType === 'DELETE') { if (idx >= 0) rows.splice(idx, 1); }
-        else {
-          var item = { id: row.id, entity: row.entity, entityId: row.entity_id, parentId: row.parent_id, label: row.label,
-            data: row.data, deletedAt: new Date(row.deleted_at).getTime(), deletedBy: row.deleted_by,
-            restoredAt: row.restored_at ? new Date(row.restored_at).getTime() : null };
-          if (idx >= 0) rows[idx] = item; else rows.push(item);
-        }
+        applyTrashPayload(st, row, payload.eventType);
+        applyTrashPayload(remoteState, row, payload.eventType);
       } else if (table === 'kv') {
         if (payload.new && payload.new.generation !== businessGeneration) return;
         if (payload.eventType === 'DELETE') return;
         var kk = payload.new.k;
-        if (kk === 'settings') st.settings = Object.assign({}, st.settings, payload.new.data);
-        else if (kk === 'meta') st.meta = Object.assign({}, st.meta, payload.new.data);
+        if (kk === 'settings' || kk === 'meta') {
+          var baseValue = remoteState[kk] || {};
+          var localValue = st[kk] || {};
+          var remoteValue = Object.assign({}, baseValue, payload.new.data || {});
+          st[kk] = mergeRecord(baseValue, localValue, remoteValue);
+          remoteState[kk] = remoteValue;
+        }
       } else {
         var arr = st[ARR[table]];
+        var remoteArr = remoteState[ARR[table]] || (remoteState[ARR[table]] = []);
+        var id = payload.eventType === 'DELETE' ? payload.old && payload.old.id : payload.new && payload.new.id;
+        var remoteIndex = remoteArr.findIndex(function (x) { return x.id === id; });
+        var remoteBefore = remoteIndex >= 0 ? remoteArr[remoteIndex] : null;
+        var localIndex = arr.findIndex(function (x) { return x.id === id; });
+        var localBefore = localIndex >= 0 ? arr[localIndex] : null;
         if (payload.eventType === 'DELETE') {
-          var oid = payload.old && payload.old.id;
-          var i = -1; arr.forEach(function (x, k) { if (x.id === oid) i = k; });
-          if (i >= 0) arr.splice(i, 1);
+          if (localIndex >= 0 && (!remoteBefore || j(localBefore) === j(remoteBefore))) arr.splice(localIndex, 1);
+          if (remoteIndex >= 0) remoteArr.splice(remoteIndex, 1);
         } else {
           if (!payload.new.data || payload.new.data._delivery_generation !== businessGeneration) return;
           var d = fromCloudData(payload.new.data);
-          var jx = -1; arr.forEach(function (x, k) { if (x.id === d.id) jx = k; });
-          if (jx >= 0) arr[jx] = d; else arr.push(d);
+          if (localIndex >= 0) arr[localIndex] = remoteBefore && j(localBefore) !== j(remoteBefore)
+            ? mergeRecord(remoteBefore, localBefore, d) : d;
+          else if (!remoteBefore) arr.push(d); // absent locally with a remote base means a pending local delete
+          if (remoteIndex >= 0) remoteArr[remoteIndex] = d; else remoteArr.push(d);
         }
       }
-      shadow = clone(st);
+      shadow = remoteState;
       store.notify();
     } catch (e) {
       console.error('sync onRemote', e);
@@ -215,9 +242,20 @@
     }
   }
 
+  function applyTrashPayload(state, row, eventType) {
+    var rows = state.trash || (state.trash = []);
+    var idx = rows.findIndex(function (x) { return x.id === row.id; });
+    if (eventType === 'DELETE') { if (idx >= 0) rows.splice(idx, 1); return; }
+    var item = { id: row.id, entity: row.entity, entityId: row.entity_id, parentId: row.parent_id, label: row.label,
+      data: row.data, deletedAt: new Date(row.deleted_at).getTime(), deletedBy: row.deleted_by,
+      restoredAt: row.restored_at ? new Date(row.restored_at).getTime() : null };
+    if (idx >= 0) rows[idx] = item; else rows.push(item);
+  }
+
   /* ------------------------ guardar (diff + subir) ------------------- */
   function onLocalChange(state) {
     if (applyingRemote) return;
+    if (pendingBulkOperation) persistPendingBulkState(state);
     if (!navigator.onLine || offlineMode) { offlineMode = true; return; }
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { flush(state); }, 400);
@@ -241,19 +279,29 @@
   }
 
   function readPendingMassSync() {
-    try {
-      var pending = JSON.parse(localStorage.getItem(PENDING_MASS_KEY) || 'null');
-      if (!pending || !pending.state || !pending.generation) return null;
-      return pending;
-    } catch (e) { return null; }
+    var raw = localStorage.getItem(PENDING_MASS_KEY);
+    if (!raw) return null;
+    var pending;
+    try { pending = JSON.parse(raw); } catch (e) { throw new Error('Hay una sincronización pendiente local dañada; se bloqueó la carga para no perder cambios.'); }
+    if (!pending || !pending.state || !pending.generation) throw new Error('Hay una sincronización pendiente local incompleta; se bloqueó la carga para no perder cambios.');
+    return pending;
+  }
+  function readPendingBulkOperation() {
+    var raw = localStorage.getItem(PENDING_BULK_KEY);
+    if (!raw) return null;
+    var pending;
+    try { pending = JSON.parse(raw); } catch (e) { throw new Error('Hay una operación masiva pendiente local dañada; se bloqueó la carga para no perder cambios.'); }
+    if (!pending || !pending.kind || !pending.generation) throw new Error('Hay una operación masiva pendiente local incompleta; se bloqueó la carga para no perder cambios.');
+    return pending;
   }
   function persistPendingMassSync(state, fingerprint, riskByTable) {
     var pending = { generation: businessGeneration, createdAt: Date.now(), fingerprint: fingerprint,
-      risks: riskByTable, state: clone(state) };
+      risks: riskByTable, state: clone(state), base: clone(shadow), bulkOperation: pendingBulkOperation ? clone(pendingBulkOperation) : null };
     try {
       localStorage.setItem(PENDING_MASS_KEY, JSON.stringify(pending));
       localStorage.setItem(store.STORAGE_KEY, JSON.stringify(state));
       pendingMassSync = pending;
+      if (pendingBulkOperation) localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation));
       return true;
     } catch (e) {
       console.error('No se pudo conservar localmente la sincronización pendiente', e);
@@ -263,6 +311,24 @@
   function clearPendingMassSync() {
     pendingMassSync = null;
     try { localStorage.removeItem(PENDING_MASS_KEY); } catch (e) {}
+  }
+  function clearPendingBulkOperation() {
+    pendingBulkOperation = null;
+    try { localStorage.removeItem(PENDING_BULK_KEY); } catch (e) {}
+  }
+  function markBulkOperation(kind, preBackedUp, beforeState) {
+    if (!generationReady || !businessGeneration) return false;
+    pendingBulkOperation = { kind: String(kind || 'operacion_masiva'), generation: businessGeneration,
+      createdAt: Date.now(), preBackedUp: preBackedUp === true && !!beforeState && j(beforeState) === j(shadow),
+      state: null, base: clone(shadow || store.blankState()) };
+    try { localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation)); return true; }
+    catch (e) { pendingBulkOperation = null; return false; }
+  }
+  function persistPendingBulkState(state) {
+    if (!pendingBulkOperation) return true;
+    pendingBulkOperation.state = clone(state);
+    try { localStorage.setItem(PENDING_BULK_KEY, JSON.stringify(pendingBulkOperation)); return true; }
+    catch (e) { console.error('No se pudo guardar el estado de la operación masiva pendiente', e); return false; }
   }
 
   function flush(state) {
@@ -277,12 +343,15 @@
     diffArr('fixed_expenses', state.fixedExpenses, shadow.fixedExpenses, ops);
     if (j(state.settings) !== j(shadow.settings)) ops.up.kv.push({ k: 'settings', data: state.settings, generation: businessGeneration });
     if (j(state.meta) !== j(shadow.meta)) ops.up.kv.push({ k: 'meta', data: state.meta, generation: businessGeneration });
+    if (ops.up.kv.length) ops.metrics.kv = { insert: 0, update: ops.up.kv.length, delete: 0 };
 
     var riskByTable = [];
-    ['vehicles','history','reminders','fixed_expenses'].forEach(function (t) {
-      var previous = t === 'vehicles' ? shadow.vehicles.length : t === 'history' ? shadow.history.length :
-        t === 'reminders' ? shadow.reminders.length : shadow.fixedExpenses.length;
+    var totalPrevious = 0, totalUpdates = 0;
+    ['vehicles','history','reminders','fixed_expenses','kv'].forEach(function (t) {
+      var previous = t === 'kv' ? 2 : (shadow[ARR[t]] || []).length;
       var metric = ops.metrics[t] || { insert: 0, update: 0, delete: 0 };
+      totalPrevious += previous;
+      totalUpdates += metric.update;
       // Un único DELETE ya tiene su confirmación normal en la interfaz. La
       // barrera adicional es para lotes: exige al menos dos filas y combina
       // cantidad absoluta con proporción, evitando clasificar un UPDATE 1/1
@@ -291,28 +360,27 @@
       if (metric.delete >= deleteThreshold && previous > 0) {
         riskByTable.push({ table: t, action: 'DELETE', count: metric.delete, ids: ops.del[t].slice().sort() });
       }
-      var upsertCount = metric.insert + metric.update;
-      // Mantener el mínimo absoluto de 3 para altas nuevas; para cambios sobre
-      // conjuntos pequeños exigir al menos dos filas, aunque sean el 100%.
-      var upsertThreshold = previous <= 3
-        ? (previous === 0 ? 3 : 2)
-        : Math.max(3, Math.ceil(previous * 0.5));
-      var broadUpsert = upsertCount >= upsertThreshold;
-      if (upsertCount > 0 && broadUpsert) {
-        riskByTable.push({ table: t, action: 'UPSERT', count: upsertCount, ids: ops.up[t].map(function (x) { return x.id; }).sort() });
-      }
-      var replacementCount = metric.delete + metric.insert;
-      var replacementThreshold = previous <= 3 ? 2 : Math.max(3, Math.ceil(previous * 0.5));
-      if (metric.delete > 0 && metric.insert > 0 && replacementCount >= replacementThreshold &&
-          !riskByTable.some(function (x) { return x.table === t && x.action === 'DELETE'; })) {
-        riskByTable.push({ table: t, action: 'REEMPLAZO', count: replacementCount,
-          ids: ops.del[t].concat(ops.up[t].map(function (x) { return x.id; })).sort() });
+      // Los INSERT son aditivos (incluidos movimientos de historial que una
+      // operación comercial puede crear en pareja) y por sí solos no
+      // sobrescriben el estado remoto. Para UPDATE exigir un lote absoluto y
+      // una fracción significativa; importación/restauración/reset se cubren
+      // por intención explícita, incluso en colecciones de 1 o 2 filas.
+      var updateThreshold = Math.max(MIN_BULK_EXISTING_UPDATES, Math.ceil(previous * 0.5));
+      if (metric.update >= updateThreshold) {
+        var ids = t === 'kv' ? ops.up.kv.map(function (x) { return x.k; }) :
+          ops.up[t].filter(function (x) { return !!(shadow[ARR[t]] || []).some(function (old) { return old.id === x.id; }); }).map(function (x) { return x.id; });
+        riskByTable.push({ table: t, action: 'UPDATE', count: metric.update,
+          ids: ids.sort() });
       }
     });
+    var totalUpdateThreshold = Math.max(MIN_BULK_EXISTING_UPDATES, Math.ceil(totalPrevious * 0.5));
+    if (totalUpdates >= totalUpdateThreshold && !riskByTable.some(function (x) { return x.action === 'UPDATE'; })) {
+      riskByTable.push({ table: 'varias tablas', action: 'UPDATE', count: totalUpdates, ids: [] });
+    }
     // Incluye el contenido efectivo, no solo los IDs: una aprobación previa
     // nunca debe autorizar otra versión del mismo lote.
-    var fingerprint = j({ risks: riskByTable, up: ops.up, del: ops.del });
-    var requiresApproval = riskByTable.length > 0 || !!pendingMassSync;
+    var fingerprint = j({ risks: riskByTable, up: ops.up, del: ops.del, bulkOperation: pendingBulkOperation });
+    var requiresApproval = riskByTable.length > 0 || !!pendingMassSync || !!pendingBulkOperation;
     if (requiresApproval && deletionApprovalPending) return Promise.resolve(false);
     if (requiresApproval && approvedMassChangeFingerprint !== fingerprint && !deletionApprovalPending) {
       if (!persistPendingMassSync(state, fingerprint, riskByTable)) {
@@ -323,10 +391,16 @@
       deletionApprovalPending = true;
       var riskDescription = riskByTable.length
         ? riskByTable.map(function (x) { return x.action + ' ' + x.count + ' en ' + x.table; }).join(', ')
-        : 'cambios pendientes que antes fueron cancelados';
-      return App.ui.confirm({ title: riskByTable.length ? 'Cambios grandes de sincronización' : 'Sincronización pendiente',
-        message: 'La sincronización contiene ' + riskDescription +
-          '. Si confirmás, se guardará primero una copia del estado remoto y se registrará la operación. Si cancelás, los cambios quedarán guardados localmente y no se enviarán.', danger: true, confirmText: 'Confirmar sincronización' })
+        : pendingBulkOperation
+          ? 'operación de estado completo: ' + pendingBulkOperation.kind
+          : 'cambios pendientes que antes fueron cancelados';
+      if (pendingBulkOperation && riskByTable.length) riskDescription += ' · operación: ' + pendingBulkOperation.kind;
+      var needsRemoteBackup = !(pendingBulkOperation && pendingBulkOperation.preBackedUp);
+      var safetyDescription = needsRemoteBackup
+        ? 'Al confirmar, se guardará primero una copia del estado remoto y se registrará la operación.'
+        : 'Ya existe una copia previa y la operación está registrada. Al confirmar, se sincronizarán los cambios.';
+      return App.ui.confirm({ title: riskByTable.length || pendingBulkOperation ? 'Cambios grandes de sincronización' : 'Sincronización pendiente',
+        message: 'La sincronización contiene ' + riskDescription + '. ' + safetyDescription + ' Si cancelás, los cambios quedarán guardados localmente y no se enviarán.', danger: true, confirmText: 'Confirmar sincronización' })
         .then(function (ok) {
           deletionApprovalPending = false;
           if (!ok) {
@@ -334,14 +408,18 @@
             App.ui.toast('Cambios conservados en este dispositivo; no se enviaron a Supabase.', 'error');
             return false;
           }
-          return saveSnapshotState(shadow, 'Estado anterior a operación masiva', 'safety').then(function () {
+          var existingBackup = pendingBulkOperation && pendingBulkOperation.preBackedUp;
+          var backup = existingBackup ? Promise.resolve() : saveSnapshotState(shadow, 'Estado anterior a operación masiva', 'safety');
+          return backup.then(function () {
             var details = { tables: {} };
-            riskByTable.forEach(function (risk) {
-              var m = ops.metrics[risk.table] || { insert: 0, update: 0, delete: 0 };
-              details.tables[risk.table] = { INSERT: m.insert, UPDATE: m.update, DELETE: m.delete };
+            Object.keys(ops.metrics).forEach(function (table) {
+              var m = ops.metrics[table];
+              details.tables[table] = { INSERT: m.insert, UPDATE: m.update, DELETE: m.delete };
             });
+            details.totalUpdates = totalUpdates;
             if (!riskByTable.length) details.pendingRetry = true;
-            return logOperation('operacion_masiva', 'sincronizacion', details);
+            if (pendingBulkOperation) details.bulkOperation = pendingBulkOperation.kind;
+            return existingBackup ? true : logOperation('operacion_masiva', 'sincronizacion', details);
           }).then(function (logged) {
             if (!logged) throw new Error('No se pudo registrar la operación masiva.');
             approvedMassChangeFingerprint = fingerprint;
@@ -363,7 +441,7 @@
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
     if (!promises.length) {
-      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
+      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
         console.error('sync safety flush', e); offlineMode = true;
         App.ui && App.ui.toast('No se pudo guardar la papelera en la nube. Revisá internet.', 'error');
         if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(reconnect, 8000);
@@ -380,6 +458,7 @@
       shadow = clone(state);
       saveBase(state);
       clearPendingMassSync();
+      clearPendingBulkOperation();
       return ensureCloudDailySnapshot(state).then(function () { return true; });
     }).catch(function (e) {
       console.error('sync flush', e);
@@ -482,9 +561,11 @@
 
   // Aplicar solamente las diferencias locales posteriores a la última base
   // conocida sobre la descarga actual evita descartar trabajo offline.
-  function mergeOfflineChanges(remote, local) {
-    var base = null;
-    try { base = JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) {}
+  function readBaseState() {
+    try { return JSON.parse(localStorage.getItem(BASE_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function mergeOfflineChanges(remote, local, baseOverride) {
+    var base = baseOverride || readBaseState();
     if (!base) base = store.blankState();
     var pairs = [
       ['vehicles', base.vehicles, local.vehicles], ['history', base.history, local.history],
@@ -502,7 +583,9 @@
             ? mergeRecord(before[id], after[id], byId[id]) : after[id];
         }
       });
-      Object.keys(after).forEach(function (id) { if (!before[id]) byId[id] = after[id]; });
+      Object.keys(after).forEach(function (id) {
+        if (!before[id] && !Object.prototype.hasOwnProperty.call(byId, id)) byId[id] = after[id];
+      });
       remote[key] = Object.keys(byId).map(function (id) { return byId[id]; });
     });
     ['settings', 'meta'].forEach(function (key) {
@@ -605,13 +688,20 @@
           localStorage.removeItem(store.STORAGE_KEY);
           localStorage.removeItem(BASE_KEY);
           localStorage.removeItem('paginaToto:snapshots');
+          localStorage.removeItem(PENDING_MASS_KEY);
+          localStorage.removeItem(PENDING_BULK_KEY);
         } catch (e) {}
+        pendingMassSync = null;
+        pendingBulkOperation = null;
         generationReady = false;
         store.hydrate(store.blankState());
         App.ui && App.ui.toast('Estado local anterior descartado. Conectate para cargar la etapa comercial vigente.', 'error');
       } else {
         businessGeneration = localGeneration;
         generationReady = true;
+        pendingMassSync = readPendingMassSync();
+        pendingBulkOperation = readPendingBulkOperation();
+        if (!pendingBulkOperation && pendingMassSync && pendingMassSync.bulkOperation) pendingBulkOperation = pendingMassSync.bulkOperation;
         store.load();
       }
       offlineMode = true;
@@ -634,6 +724,7 @@
     fetchSnapshotDetails: fetchSnapshotDetails,
     saveSnapshot: saveSnapshot,
     restoreRemoteSnapshot: restoreRemoteSnapshot,
-    logOperation: logOperation
+    logOperation: logOperation,
+    markBulkOperation: markBulkOperation
   };
 })();
