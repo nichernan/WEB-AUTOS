@@ -6047,45 +6047,62 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
 
   function onRemote(table, payload) {
     var st = store.getState();
+    var remoteState = clone(shadow || st);
     applyingRemote = true;
     try {
       if (table === 'app_trash') {
-        var rows = st.trash || (st.trash = []), row = payload.new || payload.old;
+        var row = payload.new || payload.old;
         if (row.generation && row.generation !== businessGeneration) return;
-        var idx = rows.findIndex(function (x) { return x.id === row.id; });
-        if (payload.eventType === 'DELETE') { if (idx >= 0) rows.splice(idx, 1); }
-        else {
-          var item = { id: row.id, entity: row.entity, entityId: row.entity_id, parentId: row.parent_id, label: row.label,
-            data: row.data, deletedAt: new Date(row.deleted_at).getTime(), deletedBy: row.deleted_by,
-            restoredAt: row.restored_at ? new Date(row.restored_at).getTime() : null };
-          if (idx >= 0) rows[idx] = item; else rows.push(item);
-        }
+        applyTrashPayload(st, row, payload.eventType);
+        applyTrashPayload(remoteState, row, payload.eventType);
       } else if (table === 'kv') {
         if (payload.new && payload.new.generation !== businessGeneration) return;
         if (payload.eventType === 'DELETE') return;
         var kk = payload.new.k;
-        if (kk === 'settings') st.settings = Object.assign({}, st.settings, payload.new.data);
-        else if (kk === 'meta') st.meta = Object.assign({}, st.meta, payload.new.data);
+        if (kk === 'settings' || kk === 'meta') {
+          var baseValue = remoteState[kk] || {};
+          var localValue = st[kk] || {};
+          var remoteValue = Object.assign({}, baseValue, payload.new.data || {});
+          st[kk] = mergeRecord(baseValue, localValue, remoteValue);
+          remoteState[kk] = remoteValue;
+        }
       } else {
         var arr = st[ARR[table]];
+        var remoteArr = remoteState[ARR[table]] || (remoteState[ARR[table]] = []);
+        var id = payload.eventType === 'DELETE' ? payload.old && payload.old.id : payload.new && payload.new.id;
+        var remoteIndex = remoteArr.findIndex(function (x) { return x.id === id; });
+        var remoteBefore = remoteIndex >= 0 ? remoteArr[remoteIndex] : null;
+        var localIndex = arr.findIndex(function (x) { return x.id === id; });
+        var localBefore = localIndex >= 0 ? arr[localIndex] : null;
         if (payload.eventType === 'DELETE') {
-          var oid = payload.old && payload.old.id;
-          var i = -1; arr.forEach(function (x, k) { if (x.id === oid) i = k; });
-          if (i >= 0) arr.splice(i, 1);
+          if (localIndex >= 0 && (!remoteBefore || j(localBefore) === j(remoteBefore))) arr.splice(localIndex, 1);
+          if (remoteIndex >= 0) remoteArr.splice(remoteIndex, 1);
         } else {
           if (!payload.new.data || payload.new.data._delivery_generation !== businessGeneration) return;
           var d = fromCloudData(payload.new.data);
-          var jx = -1; arr.forEach(function (x, k) { if (x.id === d.id) jx = k; });
-          if (jx >= 0) arr[jx] = d; else arr.push(d);
+          if (localIndex >= 0) arr[localIndex] = remoteBefore && j(localBefore) !== j(remoteBefore)
+            ? mergeRecord(remoteBefore, localBefore, d) : d;
+          else if (!remoteBefore) arr.push(d); // absent locally with a remote base means a pending local delete
+          if (remoteIndex >= 0) remoteArr[remoteIndex] = d; else remoteArr.push(d);
         }
       }
-      shadow = clone(st);
+      shadow = remoteState;
       store.notify();
     } catch (e) {
       console.error('sync onRemote', e);
     } finally {
       applyingRemote = false;
     }
+  }
+
+  function applyTrashPayload(state, row, eventType) {
+    var rows = state.trash || (state.trash = []);
+    var idx = rows.findIndex(function (x) { return x.id === row.id; });
+    if (eventType === 'DELETE') { if (idx >= 0) rows.splice(idx, 1); return; }
+    var item = { id: row.id, entity: row.entity, entityId: row.entity_id, parentId: row.parent_id, label: row.label,
+      data: row.data, deletedAt: new Date(row.deleted_at).getTime(), deletedBy: row.deleted_by,
+      restoredAt: row.restored_at ? new Date(row.restored_at).getTime() : null };
+    if (idx >= 0) rows[idx] = item; else rows.push(item);
   }
 
   /* ------------------------ guardar (diff + subir) ------------------- */
