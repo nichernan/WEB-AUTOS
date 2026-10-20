@@ -259,7 +259,7 @@
       onclick: function (e) {
         e.preventDefault(); e.stopPropagation();
         ui.confirm({ title: 'Eliminar alerta', message: '¿Eliminar "' + r.titulo + '"?', danger: true, confirmText: 'Eliminar' })
-          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Alerta eliminada'); } });
+          .then(function (ok) { if (ok && store.removeReminder(r.id)) store.finishMutation('Alerta eliminada'); });
       }
     });
     return el('div', { class: 'w-row w-' + tone }, [
@@ -282,8 +282,8 @@
       (e.kind === 'cobrar' ? 'te lo pagan a vos' : (e.kind === 'pagar' ? 'lo pagás vos' : 'reserva'));
     var tone = toneOf(e.status, e.date, hoy);
     var action = null;
-    if (e.kind === 'pagar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Pagué', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.pagarCuota(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cuota pagada', 'success'); } });
-    else if (e.kind === 'cobrar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Me pagaron', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); store.cobrarCuotaVenta(e.vehicle.id, e.cuota.id, hoy); ui.toast('Cobro registrado', 'success'); } });
+    if (e.kind === 'pagar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Pagué', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); if (store.pagarCuota(e.vehicle.id, e.cuota.id, hoy)) store.finishMutation('Cuota pagada'); } });
+    else if (e.kind === 'cobrar') action = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Me pagaron', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); if (store.cobrarCuotaVenta(e.vehicle.id, e.cuota.id, hoy)) store.finishMutation('Cobro registrado'); } });
     else action = el('a', { class: 'btn btn-sm btn-ghost', href: '#/vehiculo/' + e.vehicle.id, text: 'Ver ficha' });
     return el('div', { class: 'w-row w-auto w-' + tone }, [
       dateTile(tone, e.date, e.status),
@@ -1376,8 +1376,8 @@
         el('div', { class: 'cb-act' }, done ? el('span', { class: 'cb-ok' }, [ui.icon('check'), el('span', { text: tipo === 'pagar' ? 'Pagada' : 'Cobrada' })])
           : el('button', { class: 'btn btn-sm ' + (it.estado === 'vencida' ? 'btn-primary' : 'btn-ghost'), type: 'button', text: tipo === 'pagar' ? 'Pagué' : 'Me pagaron', onclick: function (e) {
             e.preventDefault(); e.stopPropagation();
-            if (tipo === 'pagar') store.pagarCuota(v.id, c.id, hoy); else store.cobrarCuotaVenta(v.id, c.id, hoy);
-            ui.toast('Listo', 'success');
+            var saved = tipo === 'pagar' ? store.pagarCuota(v.id, c.id, hoy) : store.cobrarCuotaVenta(v.id, c.id, hoy);
+            if (saved) store.finishMutation('Listo');
           } }))
       ]);
     }
@@ -1525,7 +1525,7 @@
         ]),
         el('div', { class: 'row-btns' }, [
           el('button', { class: 'btn btn-sm btn-primary', text: 'Restaurar', onclick: function () {
-            if (store.restoreTrash(item.id)) { ui.toast('Elemento restaurado', 'success'); App.router.render(); }
+            if (store.restoreTrash(item.id)) store.finishMutation('Elemento restaurado', function () { App.router.render(); });
             else ui.toast('No se pudo restaurar; puede faltar el elemento relacionado.', 'error');
           } }),
           el('details', { class: 'cfg-note' }, [el('summary', { text: 'Ver datos originales' }), el('pre', { text: JSON.stringify(item.data, null, 2) })])
@@ -1661,7 +1661,7 @@
               counts.vehicles + ' vehículos, ' + counts.history + ' movimientos, ' + counts.reminders + ' recordatorios y ' + counts.fixed_expenses + ' gastos fijos. ¿Continuar?',
               danger: true, confirmText: 'Crear copia e importar' }).then(function (ok) {
               if (!ok) return;
-              try { store.importJSON(r.result).then(function () { ui.toast('Copia previa guardada e importación completada', 'success'); App.router.render(); })
+              try { store.importJSON(r.result).then(function (result) { if (result !== false) store.finishMutation('Copia previa guardada e importación completada', function () { App.router.render(); }); })
                 .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa', 'error'); }); }
               catch (e) { ui.toast(e.message || 'Archivo inválido', 'error'); }
             });
@@ -1903,8 +1903,7 @@
         cfgRow('Alerta: días antes de vencer una cuota', 'Cuántos días antes te avisamos de una cuota por vencer.', fCuota)
       ]),
       el('div', { class: 'cfg-save' }, el('button', { class: 'btn btn-primary', type: 'button', text: 'Guardar ajustes', onclick: function () {
-        store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 });
-        ui.toast('Ajustes guardados', 'success'); App.router.render();
+        if (store.updateSettings({ dolarActual: fDolar.value, diasStockAlerta: parseInt(fDias.value, 10) || 60, cuotaProximaDias: parseInt(fCuota.value, 10) || 7 })) store.finishMutation('Ajustes guardados', function () { App.router.render(); });
       } }))
     ])];
   }
@@ -2090,7 +2089,7 @@
               .then(function (ok) {
                 if (!ok) return;
                 try { ui.downloadFile('paginatoto-ANTES-DE-BORRAR-' + store.todayISO() + '.json', store.exportJSON(), 'application/json'); } catch (e) {}
-                store.resetAll().then(function () { ui.toast('Datos reiniciados. Se guardó una copia previa y el archivo descargado.', 'success'); App.router.go(''); })
+                store.resetAll().then(function (result) { if (result && result.status !== 'rejected') store.finishMutation('Datos reiniciados. Se guardó una copia previa y el archivo descargado.', function () { App.router.go(''); }); })
                   .catch(function (e) { ui.toast(e.message || 'No se pudo guardar la copia previa; no se reinició el estado.', 'error'); });
               });
           } })])

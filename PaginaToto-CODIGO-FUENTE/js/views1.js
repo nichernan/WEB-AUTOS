@@ -514,7 +514,7 @@
       { text: 'Comparar dólar', onclick: function () { App.router.go('comparacion/' + v.id); } },
       { text: 'Papelera', danger: true, onclick: function () {
         ui.confirm({ title: 'Enviar a papelera', message: '¿Seguro que querés eliminar este vehículo? Se moverá a la Papelera y podrás restaurarlo.', danger: true, confirmText: 'Enviar a papelera' })
-          .then(function (ok) { if (ok) { store.softDeleteVehicle(v.id); ui.toast('Movido a la papelera', 'success'); App.router.go('vehiculos'); } });
+          .then(function (ok) { if (ok && store.softDeleteVehicle(v.id)) store.finishMutation('Movido a la papelera', function () { App.router.go('vehiculos'); }); });
       } }
     ]);
 
@@ -807,7 +807,7 @@
       body: ui.field('Fecha en que se pagó', f),
       footer: [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { mm.close(); } }),
-        el('button', { class: 'btn btn-primary', text: 'Confirmar pago', onclick: function () { store.pagarCuota(vehicleId, c.id, f.value); ui.toast('Cuota registrada', 'success'); mm.close(); App.router.render(); } })
+        el('button', { class: 'btn btn-primary', text: 'Confirmar pago', onclick: function () { if (store.pagarCuota(vehicleId, c.id, f.value)) store.finishMutation('Cuota registrada', function () { mm.close(); App.router.render(); }); } })
       ]
     });
   }
@@ -818,7 +818,7 @@
       body: ui.field('Fecha en que te pagaron', f),
       footer: [
         el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { mm.close(); } }),
-        el('button', { class: 'btn btn-primary', text: 'Confirmar cobro', onclick: function () { store.cobrarCuotaVenta(vehicleId, c.id, f.value); ui.toast('Cobro registrado', 'success'); mm.close(); App.router.render(); } })
+        el('button', { class: 'btn btn-primary', text: 'Confirmar cobro', onclick: function () { if (store.cobrarCuotaVenta(vehicleId, c.id, f.value)) store.finishMutation('Cobro registrado', function () { mm.close(); App.router.render(); }); } })
       ]
     });
   }
@@ -841,7 +841,7 @@
           el('div', { class: 'rem-item-title' }, [el('span', { class: 'rem-item-name', text: fmt.money(e.monto, e.moneda) })]),
           el('div', { class: 'rem-item-meta', text: fmt.date(e.fecha) + (e.observacion ? ' · ' + e.observacion : '') })
         ]),
-        el('button', { class: 'icon-btn', html: '&times;', title: 'Eliminar', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); ui.confirm({ message: '¿Eliminar este gasto?', danger: true }).then(function (ok) { if (ok) { store.removeExpense(v.id, e.id); App.router.render(); } }); } })
+        el('button', { class: 'icon-btn', html: '&times;', title: 'Eliminar', onclick: function (ev) { ev.preventDefault(); ev.stopPropagation(); ui.confirm({ message: '¿Eliminar este gasto?', danger: true }).then(function (ok) { if (ok && store.removeExpense(v.id, e.id)) store.finishMutation('Gasto eliminado', function () { App.router.render(); }); }); } })
       ]);
     })));
     return out;
@@ -858,7 +858,7 @@
       el('h4', { text: 'Venta' }),
       el('div', { class: 'row-btns' }, [
         el('button', { class: 'btn btn-sm btn-ghost', text: 'Editar venta', onclick: function () { App.forms.saleForm(v.id); } }),
-        el('button', { class: 'btn btn-sm btn-danger-ghost', text: 'Anular venta', onclick: function () { ui.confirm({ message: '¿Anular la venta? El vehículo vuelve a stock.', danger: true }).then(function (ok) { if (ok) { store.cancelarVenta(v.id); ui.toast('Venta anulada'); App.router.render(); } }); } })
+        el('button', { class: 'btn btn-sm btn-danger-ghost', text: 'Anular venta', onclick: function () { ui.confirm({ message: '¿Anular la venta? El vehículo vuelve a stock.', danger: true }).then(function (ok) { if (ok && store.cancelarVenta(v.id)) store.finishMutation('Venta anulada', function () { App.router.render(); }); }); } })
       ])
     ])];
     out.push(dl([
@@ -960,7 +960,7 @@
     return [el('div', { class: 'card' }, [
       el('h4', { text: 'Estado de la documentación' }),
       el('div', { class: 'doc-options' }, opts.map(function (o) {
-        return el('button', { class: 'doc-opt' + (v.documentacion === o[0] ? ' is-active' : ''), text: o[1], onclick: function () { store.updateVehicle(v.id, { documentacion: o[0] }); ui.toast('Documentación actualizada'); App.router.render(); } });
+        return el('button', { class: 'doc-opt' + (v.documentacion === o[0] ? ' is-active' : ''), text: o[1], onclick: function () { if (store.updateVehicle(v.id, { documentacion: o[0] })) store.finishMutation('Documentación actualizada', function () { App.router.render(); }); } });
       }))
     ])];
   }
@@ -970,7 +970,7 @@
     return [el('div', { class: 'card' }, [
       el('h4', { text: 'Observaciones generales' }),
       ta,
-      el('div', { class: 'center', style: 'margin-top:12px' }, el('button', { class: 'btn btn-primary', text: 'Guardar observaciones', onclick: function () { store.updateVehicle(v.id, { observaciones: ta.value }); ui.toast('Observaciones guardadas', 'success'); } }))
+      el('div', { class: 'center', style: 'margin-top:12px' }, el('button', { class: 'btn btn-primary', text: 'Guardar observaciones', onclick: function () { if (store.updateVehicle(v.id, { observaciones: ta.value })) store.finishMutation('Observaciones guardadas'); } }))
     ])];
   }
 

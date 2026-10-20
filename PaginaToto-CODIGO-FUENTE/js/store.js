@@ -35,6 +35,7 @@
   var state = emptyState();
   var listeners = [];
   var safetyBaseline = null;
+  var lastMutation = Promise.resolve({ status: 'synced' });
 
   /* ----------------------------- Utilidades ------------------------------- */
   // id único sin depender de un contador compartido (importante para multi-usuario)
@@ -159,7 +160,8 @@
         state = targetState;
         var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
         previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
-        emit(); return true;
+        if (!emit()) return false;
+        return afterMutation().then(function (result) { return result.status !== 'rejected'; });
         });
       }).catch(function (e) { console.error('Restauración bloqueada porque no se guardó la copia previa', e); return false; });
     } catch (e) { return false; }
@@ -182,7 +184,8 @@
       App.ui && App.ui.toast('No se guardaron los cambios en este dispositivo. Exportá una copia y liberá espacio.', 'error');
     }
     // modo online (multi-usuario): además, guardar en la nube
-    if (App.data && App.data.onLocalChange) App.data.onLocalChange(state);
+    if (App.data && App.data.onLocalChange) return App.data.onLocalChange(state);
+    return Promise.resolve({ status: 'synced' });
   }
 
   // reemplaza el estado completo (usado por la sincronización con la nube). No guarda.
@@ -315,19 +318,49 @@
   function emit() {
     if (remoteSafetyMissing() || deliveryGenerationMissing()) {
       if (safetyBaseline) state = deepClone(safetyBaseline);
+      lastMutation = Promise.resolve({ status: 'rejected', reason: 'safety' });
       App.ui && App.ui.toast(deliveryGenerationMissing()
         ? 'Cambios bloqueados hasta cargar la etapa comercial vigente desde Supabase.'
         : 'Cambios bloqueados: aplicá primero la migración de auditoría y recuperación en Supabase.', 'error');
       listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
-      return;
+      return false;
     }
     if (App.auth && App.auth.enabled && App.data && App.data.backupWritesBlocked && App.data.backupWritesBlocked()) {
       if (safetyBaseline) state = deepClone(safetyBaseline);
+      lastMutation = Promise.resolve({ status: 'rejected', reason: 'backup' });
       App.ui && App.ui.toast('Los cambios están pausados hasta completar la copia de seguridad. Podés seguir consultando la información.', 'error');
       listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
-      return;
+      return false;
     }
-    save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+    lastMutation = Promise.resolve(save()).then(function (result) {
+      return result && result.status ? result : { status: result === false ? 'pending' : 'synced' };
+    }, function () { return { status: 'pending', reason: 'sync' }; });
+    listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+    return true;
+  }
+  function afterMutation() { return lastMutation; }
+  function finishMutation(message, onContinue) {
+    return afterMutation().then(function (result) {
+      result = result || { status: 'pending' };
+      if (result.status === 'rejected') {
+        App.ui && App.ui.toast('No se pudo completar la operación. Supabase la rechazó y no se aplicaron los cambios. ' +
+          (result.reason === 'backup' ? 'Reintentá la copia desde el aviso.' : 'Revisá la protección y volvé a intentar.'), 'error');
+        return false;
+      }
+      if (result.status === 'pending') {
+        App.ui && App.ui.toast(message + '. Guardado en este dispositivo; pendiente de sincronización.', 'info');
+      } else {
+        App.ui && App.ui.toast(message, 'success');
+      }
+      if (onContinue) onContinue(result);
+      return result.status;
+    });
+  }
+  function discardRejectedChanges(remoteState) {
+    state = migrate(deepClone(remoteState || emptyState()));
+    safetyBaseline = deepClone(state);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
   function safetyReady(action) {
     if (deliveryGenerationMissing()) {
@@ -402,7 +435,7 @@
         detalle: 'Vehículo agregado al sistema' + (v.origin.type === 'parte-de-pago' ? ' (recibido como parte de pago)' : '')
       });
     }
-    emit();
+    if (!emit()) return null;
     return v;
   }
 
@@ -424,7 +457,7 @@
         logEvent({ tipo: 'edicion', vehicleId: v.id, titulo: 'Editaste ' + vehicleName(v), detalle: changed.join(', ') });
       }
     }
-    emit();
+    if (!emit()) return null;
     return v;
   }
 
@@ -445,7 +478,8 @@
     v.deletedAt = Date.now();
     addTrashEntry('vehicle', v.id, null, { vehicle: deepClone(v), history: deepClone(state.history.filter(function (h) { return h.vehicleId === id; })) }, 'Vehículo');
     logEvent({ tipo: 'papelera', vehicleId: v.id, titulo: 'Enviaste a papelera ' + vehicleName(v), detalle: 'El vehículo puede restaurarse desde la Papelera' });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   function restoreVehicle(id) {
@@ -457,7 +491,8 @@
     markTrashRestored('vehicle', v.id);
     logEvent({ tipo: 'restaurar', vehicleId: v.id, titulo: 'Restauraste ' + vehicleName(v), detalle: 'El vehículo volvió al sistema' });
     if (App.data && App.data.logOperation) App.data.logOperation('restauracion', 'vehicle', { entityId: id });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   function hardDeleteVehicle(id) {
@@ -474,7 +509,8 @@
       if (x.origin && x.origin.type === 'parte-de-pago' && x.origin.saleVehicleId === id) x.origin.saleVehicleId = null;
     });
     state.history = state.history.filter(function (h) { return h.vehicleId !== id; });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* --------------------------- Registrar compra ------------------------- */
@@ -506,7 +542,7 @@
         ' · ' + formaPagoLabel(v.purchase.formaPago),
       monto: v.purchase.precio, moneda: v.purchase.moneda
     });
-    emit();
+    if (!emit()) return null;
     return v;
   }
 
@@ -552,7 +588,8 @@
       detalle: App.fmt.money(c.monto, v.purchase.moneda),
       monto: c.monto, moneda: v.purchase.moneda
     });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   function desmarcarCuota(vehicleId, cuotaId) {
@@ -562,7 +599,8 @@
     if (!c) return;
     c.pagada = false;
     c.fechaPago = null;
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* ---------------------------- Registrar venta ------------------------- */
@@ -659,7 +697,7 @@
         (tradeIn ? ' · + vehículo recibido' : ''),
       monto: v.sale.precio, moneda: v.sale.moneda
     });
-    emit();
+    if (!emit()) return null;
     return v;
   }
 
@@ -676,7 +714,8 @@
     v.sale = null;
     v.estado = v.reservation ? 'reservado' : 'stock';
     logEvent({ tipo: 'estado', vehicleId: v.id, titulo: 'Anulaste la venta de ' + vehicleName(v), detalle: 'El vehículo volvió a ' + estadoLabel(v.estado).toLowerCase() });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* ------------------------------ Reserva / seña ---------------------- */
@@ -705,7 +744,7 @@
         (v.reservation.vence ? ' · vence ' + App.fmt.date(v.reservation.vence) : ''),
       monto: v.reservation.monto, moneda: v.reservation.moneda
     });
-    emit();
+    if (!emit()) return false;
     return v;
   }
   function cancelReservation(id) {
@@ -714,7 +753,8 @@
     v.reservation = null;
     if (v.estado === 'reservado') v.estado = 'stock';
     logEvent({ tipo: 'estado', vehicleId: v.id, titulo: 'Cancelaste la reserva de ' + vehicleName(v), detalle: 'El vehículo volvió a stock' });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* ----------------- Cuotas a cobrar (venta financiada) ------------- */
@@ -731,7 +771,8 @@
       detalle: App.fmt.money(c.monto, v.sale.financiacion.moneda),
       monto: c.monto, moneda: v.sale.financiacion.moneda
     });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
   function descobrarCuotaVenta(vehicleId, cuotaId) {
     var v = getVehicle(vehicleId);
@@ -739,7 +780,8 @@
     var c = (v.sale.financiacion.cuotas || []).filter(function (x) { return x.id === cuotaId; })[0];
     if (!c) return;
     c.cobrada = false; c.fechaCobro = null;
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* ------------------------------- Gastos ------------------------------- */
@@ -763,7 +805,7 @@
       detalle: App.fmt.money(e.monto, e.moneda) + (e.observacion ? ' · ' + e.observacion : ''),
       monto: e.monto, moneda: e.moneda
     });
-    emit();
+    if (!emit()) return null;
     return e;
   }
 
@@ -775,7 +817,8 @@
     Object.assign(e, patch);
     e.monto = num(e.monto);
     v.updatedAt = Date.now();
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   function removeExpense(vehicleId, expenseId) {
@@ -788,7 +831,8 @@
     v.expenses = v.expenses.filter(function (x) { return x.id !== expenseId; });
     v.updatedAt = Date.now();
     logEvent({ tipo: 'gasto', vehicleId: v.id, titulo: 'Eliminaste un gasto de ' + vehicleName(v), detalle: '' });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* --------------------- Gastos fijos del negocio -------------------- */
@@ -807,7 +851,7 @@
       detalle: App.fmt.money(f.monto, f.moneda) + (f.frecuencia === 'mensual' ? ' · por mes' : ' · una vez'),
       monto: f.monto, moneda: f.moneda
     });
-    emit();
+    if (!emit()) return null;
     return f;
   }
   function updateFixedExpense(id, patch) {
@@ -815,7 +859,7 @@
     if (!f) return null;
     Object.keys(patch).forEach(function (k) { f[k] = patch[k]; });
     normalizeFixedExpense(f);
-    emit();
+    if (!emit()) return null;
     return f;
   }
   function removeFixedExpense(id) {
@@ -823,7 +867,8 @@
     var removed = getFixedExpense(id);
     if (removed) addTrashEntry('fixed_expense', removed.id, null, removed, 'Gasto fijo');
     state.fixedExpenses = (state.fixedExpenses || []).filter(function (f) { return f.id !== id; });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
   function categoriaLabel(c) {
     return ({ alquiler: 'Alquiler del local', sueldos: 'Sueldos', seguros: 'Seguros / flota', patentes: 'Patentes e impuestos', servicios: 'Servicios (luz, internet…)', publicidad: 'Publicidad', otro: 'Otro' })[c] || c;
@@ -833,7 +878,8 @@
   function updateSettings(patch) {
     Object.assign(state.settings, patch);
     if (patch.dolarActual != null) state.settings.dolarActual = num(patch.dolarActual);
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   /* ---------------------------- Recordatorios ------------------------- */
@@ -846,7 +892,7 @@
       tipo: data.tipo, nota: data.nota, repeat: data.repeat
     });
     state.reminders.push(r);
-    emit();
+    if (!emit()) return null;
     return r;
   }
   function updateReminder(id, patch) {
@@ -854,7 +900,7 @@
     if (!r) return null;
     Object.keys(patch).forEach(function (k) { r[k] = patch[k]; });
     normalizeReminder(r);
-    emit();
+    if (!emit()) return null;
     return r;
   }
   // marca / desmarca UNA ocurrencia (para recordatorios que se repiten,
@@ -866,14 +912,16 @@
     var i = r.doneDates.indexOf(occDate);
     if (i >= 0) r.doneDates.splice(i, 1);
     else r.doneDates.push(occDate);
-    emit();
+    if (!emit()) return false;
+    return true;
   }
   function removeReminder(id) {
     if (!safetyReady('eliminar')) return;
     var removed = getReminder(id);
     if (removed) addTrashEntry('reminder', removed.id, null, removed, 'Recordatorio');
     state.reminders = (state.reminders || []).filter(function (r) { return r.id !== id; });
-    emit();
+    if (!emit()) return false;
+    return true;
   }
 
   function addTrashEntry(entity, entityId, parentId, data, label) {
@@ -908,7 +956,8 @@
     } else return false;
     item.restoredAt = now;
     if (App.data && App.data.logOperation) App.data.logOperation('restauracion', item.entity, { trashId: item.id, entityId: item.entityId });
-    emit(); return true;
+    if (!emit()) return false;
+    return true;
   }
 
   /* ------------------------- Import / Export / Reset ------------------- */
@@ -928,7 +977,8 @@
       state = imported;
       var seenTrash = {}; state.trash.forEach(function (x) { seenTrash[x.id] = true; });
       previousTrash.forEach(function (x) { if (!seenTrash[x.id]) state.trash.push(x); });
-      emit();
+      if (!emit()) return false;
+      return afterMutation();
       });
     });
   }
@@ -944,7 +994,8 @@
       var previousTrash = (state.trash || []).slice();
       state = emptyState();
       state.trash = previousTrash;
-      emit();
+      if (!emit()) throw new Error('Supabase bloqueó el reinicio; se conservaron los datos anteriores.');
+      return afterMutation();
       });
     });
   }
@@ -1034,7 +1085,10 @@
     updateSettings: updateSettings,
     exportJSON: exportJSON, importJSON: importJSON, resetAll: resetAll,
     markBackup: markBackup, takeSnapshot: takeSnapshot, createSnapshot: createSnapshot, cacheSnapshot: cacheSnapshot, getSnapshots: getSnapshots, restoreSnapshot: restoreSnapshot,
-    logEvent: function (e) { logEvent(e); emit(); },
+    logEvent: function (e) { logEvent(e); return emit(); },
+    afterMutation: afterMutation,
+    finishMutation: finishMutation,
+    discardRejectedChanges: discardRejectedChanges,
     // helpers
     uid: uid, todayISO: todayISO, num: num,
     vehicleName: vehicleName, estadoLabel: estadoLabel, categoriaLabel: categoriaLabel,

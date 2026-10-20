@@ -42,6 +42,11 @@
   var backupBlocked = false;
   var backupBlockMessage = '';
   var backupOverlay = null;
+  var localChangeWaiters = [];
+  var localChangeSequence = 0;
+  var localFlushInProgress = false;
+  var lastFlushOutcome = 'pending';
+  var lastRejectReason = null;
   var BACKUP_FAILURE_KEY = 'paginaToto:backupFailure';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -267,11 +272,110 @@
 
   /* ------------------------ guardar (diff + subir) ------------------- */
   function onLocalChange(state) {
-    if (applyingRemote) return;
+    if (applyingRemote) return Promise.resolve({ status: 'synced' });
     if (pendingBulkOperation) persistPendingBulkState(state);
-    if (!navigator.onLine || offlineMode) { offlineMode = true; return; }
+    if (!navigator.onLine || offlineMode) { offlineMode = true; return Promise.resolve({ status: 'pending', reason: 'offline' }); }
+    var sequence = ++localChangeSequence;
+    var promise = new Promise(function (resolve) { localChangeWaiters.push({ sequence: sequence, resolve: resolve }); });
     if (pushTimer) clearTimeout(pushTimer);
-    pushTimer = setTimeout(function () { flush(state); }, 400);
+    pushTimer = setTimeout(function () {
+      pushTimer = null;
+      if (localFlushInProgress) { scheduleLocalFlush(); return; }
+      localFlushInProgress = true;
+      var flushedSequence = localChangeSequence;
+      var stateToFlush = clone(store.getState());
+      flush(stateToFlush).then(function (ok) {
+        var status = ok === 'rejected' ? 'rejected' : (ok === true ? 'synced' : 'pending');
+        var remaining = [];
+        localChangeWaiters.forEach(function (waiter) {
+          if (waiter.sequence <= flushedSequence) waiter.resolve({ status: status, reason: status === 'pending' ? lastFlushOutcome : (status === 'rejected' ? lastRejectReason : null) });
+          else remaining.push(waiter);
+        });
+        localChangeWaiters = remaining;
+      }).catch(function (e) {
+        console.error('No se pudo completar el intento de sincronización', e);
+        lastFlushOutcome = 'pending';
+        var remaining = [];
+        localChangeWaiters.forEach(function (waiter) {
+          if (waiter.sequence <= flushedSequence) waiter.resolve({ status: 'pending', reason: 'sync' });
+          else remaining.push(waiter);
+        });
+        localChangeWaiters = remaining;
+      }).then(function () {
+        localFlushInProgress = false;
+        if (localChangeWaiters.length) scheduleLocalFlush();
+      });
+    }, 400);
+    return promise;
+  }
+  function scheduleLocalFlush() {
+    if (pushTimer) clearTimeout(pushTimer);
+    pushTimer = setTimeout(function () {
+      pushTimer = null;
+      if (localFlushInProgress) { scheduleLocalFlush(); return; }
+      localFlushInProgress = true;
+      var flushedSequence = localChangeSequence;
+      flush(clone(store.getState())).then(function (ok) {
+        var status = ok === 'rejected' ? 'rejected' : (ok === true ? 'synced' : 'pending');
+        var remaining = [];
+        localChangeWaiters.forEach(function (waiter) {
+          if (waiter.sequence <= flushedSequence) waiter.resolve({ status: status, reason: status === 'pending' ? lastFlushOutcome : (status === 'rejected' ? lastRejectReason : null) });
+          else remaining.push(waiter);
+        });
+        localChangeWaiters = remaining;
+      }).catch(function (e) {
+        console.error('No se pudo completar el intento de sincronización', e);
+        lastFlushOutcome = 'pending';
+        var remaining = [];
+        localChangeWaiters.forEach(function (waiter) {
+          if (waiter.sequence <= flushedSequence) waiter.resolve({ status: 'pending', reason: 'sync' });
+          else remaining.push(waiter);
+        });
+        localChangeWaiters = remaining;
+      }).then(function () { localFlushInProgress = false; if (localChangeWaiters.length) scheduleLocalFlush(); });
+    }, 400);
+  }
+
+  function rejectUnbackedWrite(message) {
+    discardRejectedWrite();
+    lastRejectReason = 'backup';
+    showBackupFailure(message || 'El servidor rechazó el cambio porque falta una copia de seguridad verificada.');
+    return reconcileRejectedWrite();
+  }
+  function rejectRemoteWrite(message) {
+    discardRejectedWrite();
+    lastRejectReason = 'server';
+    App.ui && App.ui.toast(message || 'Supabase rechazó la operación. No se conservará para reintentar automáticamente.', 'error');
+    return reconcileRejectedWrite();
+  }
+  function reconcileRejectedWrite() {
+    // Si algunas peticiones de una sincronización multitabla ya alcanzaron a
+    // confirmarse, volver a descargar el estado remoto evita revertir localmente
+    // a una sombra vieja. La cola del intento se elimina antes de esta lectura.
+    return loadAll().catch(function (e) {
+      console.warn('No se pudo reconciliar el estado después del rechazo; se conserva la última base confirmada.', e);
+    }).then(function () { return 'rejected'; });
+  }
+  function discardRejectedWrite() {
+    if (pushTimer) clearTimeout(pushTimer);
+    pushTimer = null;
+    approvedMassChangeFingerprint = null;
+    deletionApprovalPending = false;
+    clearPendingMassSync();
+    clearPendingBulkOperation();
+    offlineMode = false;
+    lastFlushOutcome = 'rejected';
+    if (shadow && store.discardRejectedChanges) store.discardRejectedChanges(shadow);
+    if (shadow) { saveBase(shadow); try { localStorage.setItem(store.STORAGE_KEY, JSON.stringify(shadow)); } catch (e) {} }
+  }
+  function isBackupGateError(error) {
+    return !!(error && String(error.code || '') === '55000' && /copia verificada|respaldo antes de seguir modificando/i.test(String(error.message || '')));
+  }
+  function isNetworkFailure(error) {
+    var code = String(error && error.code || '');
+    if (error && typeof error.status === 'number') return error.status === 0 || error.status >= 500;
+    if (code) return /^08/.test(code) || /^PGRST00[03]$/.test(code);
+    return /network|fetch|failed to fetch|load failed|timeout|timed out|offline|connection/i.test(String(error && error.message || error || ''));
   }
 
   function backupFailureMessage() {
@@ -585,6 +689,25 @@
     }
     if (approvedMassChangeFingerprint === fingerprint) approvedMassChangeFingerprint = null;
     deletionApprovalPending = false;
+    // Consultar el estado remoto justo antes de enviar DML. Los triggers siguen
+    // siendo la autoridad final; esta lectura evita que la mayoría de rechazos
+    // por backup pendiente se conviertan en una cola offline reintentable.
+    return fetchBackupStatus().then(function (status) {
+      if (status && status.blocked) return rejectUnbackedWrite('Supabase bloqueó la modificación porque hay cambios anteriores sin copia verificada. Reintentá la copia desde el aviso.');
+      return flushWrites(state, ops);
+    }).catch(function (e) {
+      if (isBackupGateError(e)) return rejectUnbackedWrite(e.message);
+      if (!isNetworkFailure(e)) return rejectRemoteWrite('Supabase rechazó la operación. No se aplicaron los cambios y no se volverán a enviar automáticamente.');
+      lastFlushOutcome = 'pending';
+      offlineMode = true;
+      App.ui && App.ui.toast('No se pudo confirmar la sincronización. Los cambios quedan guardados en este dispositivo y pendientes de conexión.', 'error');
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(reconnect, 8000);
+      return false;
+    });
+  }
+
+  function flushWrites(state, ops) {
     var promises = [];
     Object.keys(ops.up).forEach(function (t) {
       var key = t === 'kv' ? 'k' : 'id';
@@ -592,8 +715,9 @@
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
     if (!promises.length) {
-      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return refreshBackupStatus(); }).then(function () { return true; }).catch(function (e) {
+      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return refreshBackupStatus(); }).then(function () { lastFlushOutcome = 'synced'; return true; }).catch(function (e) {
         console.error('sync safety flush', e); offlineMode = true;
+        lastFlushOutcome = 'pending';
         App.ui && App.ui.toast('No se pudo guardar la papelera en la nube. Revisá internet.', 'error');
         if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(reconnect, 8000);
         return false;
@@ -610,10 +734,13 @@
       saveBase(state);
       clearPendingMassSync();
       clearPendingBulkOperation();
-      return refreshBackupStatus().then(function () { return true; });
+      return refreshBackupStatus().then(function () { lastFlushOutcome = 'synced'; return true; });
     }).catch(function (e) {
       console.error('sync flush', e);
+      if (isBackupGateError(e)) return rejectUnbackedWrite(e.message);
+      if (!isNetworkFailure(e)) return rejectRemoteWrite('Supabase rechazó la operación. No se aplicaron los cambios y no se volverán a enviar automáticamente.');
       offlineMode = true;
+      lastFlushOutcome = 'pending';
       App.ui && App.ui.toast('No se pudo guardar en la nube. Revisá internet.', 'error');
       // Revalida perfil, vuelve a descargar y combina cambios antes de reintentar.
       if (pushTimer) clearTimeout(pushTimer);

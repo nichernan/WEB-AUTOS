@@ -382,16 +382,15 @@
       if (isEdit && editConsigBuilder) data.origin = editConsigBuilder.getData();
 
       if (isEdit) {
-        store.updateVehicle(v.id, data);
-        if (editCompraBuilder && editCompraBuilder.hasPrice()) store.setPurchase(v.id, editCompraBuilder.getData());
-        ui.toast('Vehículo actualizado', 'success');
-        App.router.go('vehiculo/' + v.id);
+        if (!store.updateVehicle(v.id, data)) { submitted = false; return; }
+        if (editCompraBuilder && editCompraBuilder.hasPrice() && !store.setPurchase(v.id, editCompraBuilder.getData())) { submitted = false; return; }
+        store.finishMutation('Vehículo actualizado', function () { App.router.go('vehiculo/' + v.id); }).then(function (status) { if (status === false) submitted = false; });
         return;
       }
       var nv = store.createVehicle(data);
-      if (origenMode === 'compra' && compraBuilder.hasPrice()) store.setPurchase(nv.id, compraBuilder.getData());
-      ui.toast(origenMode === 'consignacion' ? 'Consignación registrada' : 'Vehículo registrado', 'success');
-      App.router.go('vehiculo/' + nv.id);
+      if (!nv) { submitted = false; return; }
+      if (origenMode === 'compra' && compraBuilder.hasPrice() && !store.setPurchase(nv.id, compraBuilder.getData())) { submitted = false; return; }
+      store.finishMutation(origenMode === 'consignacion' ? 'Consignación registrada' : 'Vehículo registrado', function () { App.router.go('vehiculo/' + nv.id); }).then(function (status) { if (status === false) submitted = false; });
     }
 
     root.appendChild(page);
@@ -551,9 +550,8 @@
         proveedor: { nombre: fProvNom.value, telefono: fProvTel.value, notas: fProvNotas.value },
         comision: comision.get()
       };
-      store.setPurchase(v.id, data);
-      ui.toast('Compra registrada', 'success');
-      m.close();
+      if (!store.setPurchase(v.id, data)) { submitted = false; return; }
+      store.finishMutation('Compra registrada', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
@@ -839,9 +837,8 @@
           ? { monto: tiDiferenciaARS(), moneda: 'ARS', montoEfectivo: tiDifEfec.value, montoTransferencia: tiDifTransf.value }
           : null
       };
-      store.setSale(v.id, data);
-      ui.toast('Venta registrada', 'success');
-      m.close();
+      if (!store.setSale(v.id, data)) { submitted = false; return; }
+      store.finishMutation('Venta registrada', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
@@ -875,7 +872,7 @@
       isEdit ? el('button', { class: 'btn btn-danger-ghost', text: 'Cancelar reserva', onclick: function () {
         m.close();
         ui.confirm({ title: 'Cancelar reserva', message: 'El auto vuelve a stock. ¿Seguro?', danger: true, confirmText: 'Cancelar reserva' })
-          .then(function (ok) { if (ok) { store.cancelReservation(v.id); ui.toast('Reserva cancelada'); App.router.render(); } });
+          .then(function (ok) { if (ok && store.cancelReservation(v.id)) store.finishMutation('Reserva cancelada', function () { App.router.render(); }); });
       } }) : null,
       el('button', { class: 'btn btn-ghost', text: 'Cerrar', onclick: function () { m.close(); } }),
       el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar' : 'Reservar', onclick: submit })
@@ -887,13 +884,13 @@
       if (submitted) return;
       if (store.num(sena.monto.value) <= 0) { ui.toast('Ingresá el monto de la seña', 'error'); return; }
       submitted = true;
-      store.setReservation(v.id, {
+      var saved = store.setReservation(v.id, {
         fecha: fFecha.value, monto: sena.monto.value, moneda: sena.moneda.value, vence: fVence.value,
         cliente: { nombre: fClienteNom.value, telefono: fClienteTel.value },
         notas: fNotas.value
       });
-      ui.toast(isEdit ? 'Reserva actualizada' : 'Vehículo reservado', 'success');
-      m.close();
+      if (!saved) { submitted = false; return; }
+      store.finishMutation(isEdit ? 'Reserva actualizada' : 'Vehículo reservado', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
@@ -931,10 +928,9 @@
       if (store.num(monto.monto.value) <= 0) { ui.toast('Ingresá el monto del gasto', 'error'); return; }
       submitted = true;
       var data = { monto: monto.monto.value, moneda: monto.moneda.value, fecha: fFecha.value, cotizacionUSD: fCotiz.value, observacion: fObs.value };
-      if (expense) store.updateExpense(v.id, e.id, data);
-      else store.addExpense(v.id, data);
-      ui.toast('Gasto guardado', 'success');
-      m.close();
+      var saved = expense ? store.updateExpense(v.id, e.id, data) : store.addExpense(v.id, data);
+      if (!saved) { submitted = false; return; }
+      store.finishMutation('Gasto guardado', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
@@ -989,7 +985,7 @@
       isEdit ? el('button', { class: 'btn btn-danger-ghost', text: 'Eliminar', onclick: function () {
         m.close();
         ui.confirm({ title: 'Eliminar gasto', message: '¿Eliminar "' + (f.concepto || 'este gasto') + '"?', danger: true, confirmText: 'Eliminar' })
-          .then(function (ok) { if (ok) { store.removeFixedExpense(f.id); ui.toast('Gasto eliminado'); } });
+          .then(function (ok) { if (ok && store.removeFixedExpense(f.id)) store.finishMutation('Gasto eliminado'); });
       } }) : null,
       el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { m.close(); } }),
       el('button', { class: 'btn btn-primary', text: isEdit ? 'Guardar' : 'Agregar', onclick: submit })
@@ -1007,9 +1003,9 @@
         concepto: fConcepto.value, categoria: f.categoria || 'otro', monto: monto.monto.value, moneda: monto.moneda.value,
         cotizacionUSD: fCotiz.value, frecuencia: fFrec.value, fecha: fFecha.value, hasta: fHasta.value, notas: fNotas.value
       };
-      if (isEdit) { store.updateFixedExpense(f.id, data); ui.toast('Gasto actualizado', 'success'); }
-      else { store.addFixedExpense(data); ui.toast('Gasto agregado', 'success'); }
-      m.close();
+      var saved = isEdit ? store.updateFixedExpense(f.id, data) : store.addFixedExpense(data);
+      if (!saved) { submitted = false; return; }
+      store.finishMutation(isEdit ? 'Gasto actualizado' : 'Gasto agregado', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
@@ -1070,7 +1066,7 @@
       isEdit ? el('button', { class: 'btn btn-danger-ghost', text: 'Eliminar', onclick: function () {
         m.close();
         ui.confirm({ title: 'Eliminar alerta', message: '¿Eliminar "' + (r.titulo || 'esta alerta') + '"?', danger: true, confirmText: 'Eliminar' })
-          .then(function (ok) { if (ok) { store.removeReminder(r.id); ui.toast('Alerta eliminada'); } });
+          .then(function (ok) { if (ok && store.removeReminder(r.id)) store.finishMutation('Alerta eliminada'); });
       } }) : null,
       el('button', { class: 'btn btn-ghost', text: 'Cancelar', onclick: function () { m.close(); } }),
       el('button', { class: 'btn btn-primary', html: isEdit ? 'Guardar' : '<span>🔔</span> Crear alerta', onclick: submit })
@@ -1085,9 +1081,9 @@
       if (!fFecha.value) { ui.toast('La fecha es obligatoria', 'error'); return; }
       submitted = true;
       var data = { titulo: fTitulo.value, fecha: fFecha.value, hora: fHora.value, tipo: fTipo.value, nota: fNota.value, repeat: fRepeat.value };
-      if (isEdit) { store.updateReminder(r.id, data); ui.toast('Alerta actualizada', 'success'); }
-      else { store.addReminder(data); ui.toast('Alerta creada', 'success'); }
-      m.close();
+      var saved = isEdit ? store.updateReminder(r.id, data) : store.addReminder(data);
+      if (!saved) { submitted = false; return; }
+      store.finishMutation(isEdit ? 'Alerta actualizada' : 'Alerta creada', function () { m.close(); }).then(function (status) { if (status === false) submitted = false; });
     }
     return m;
   }
