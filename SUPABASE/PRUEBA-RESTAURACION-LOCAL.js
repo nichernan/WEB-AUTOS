@@ -25,14 +25,17 @@ async function main() {
   const vehicle = store.createVehicle({ marca: 'TEMPORAL', modelo: 'Estado A', patente: 'TEST-A' });
   const remoteSnapshots = [];
   const operations = [];
+  const sequence = [];
   context.App.data = {
     safetyAvailable: () => true,
     isOffline: () => false,
     saveSnapshot: snapshot => {
+      sequence.push({ type: 'snapshot', label: snapshot.etiqueta });
       remoteSnapshots.push(JSON.parse(JSON.stringify({ label: snapshot.etiqueta, state: JSON.parse(snapshot.data) })));
       return Promise.resolve(true);
     },
-    logOperation: action => { operations.push(action); return Promise.resolve(true); },
+    logOperation: action => { sequence.push({ type: 'operation', action }); operations.push(action); return Promise.resolve(true); },
+    markBulkOperation: () => true,
     onLocalChange: () => {}
   };
 
@@ -48,7 +51,19 @@ async function main() {
   assert.ok(backupB, 'debe existir backup previo con etiqueta explícita');
   assert.equal(backupB.state.vehicles.find(x => x.id === vehicle.id).modelo, 'Estado B', 'el backup previo debe contener B');
   assert.ok(operations.includes('restauracion'), 'la restauración debe quedar registrada');
-  console.log('PASS restauración aislada: A -> B -> A; backup previo contiene B y se etiqueta correctamente.');
+
+  sequence.length = 0;
+  const imported = { ...store.getState(), vehicles: [{ id: 'imported-fixture', marca: 'TEMPORAL', modelo: 'Importado' }] };
+  await store.importJSON(JSON.stringify(imported));
+  assert.equal(store.getState().vehicles[0].id, 'imported-fixture');
+  assert.equal(sequence[0].label, 'Estado anterior a importación', 'la importación toma backup antes del reemplazo');
+  assert.ok(sequence.findIndex(x => x.action === 'importacion') > 0, 'la importación se registra después del backup previo');
+  sequence.length = 0;
+  await store.resetAll();
+  assert.equal(store.getState().vehicles.length, 0, 'reset aislado deja el estado vacío');
+  assert.equal(sequence[0].label, 'Estado anterior a reset', 'el reset toma backup antes del reemplazo');
+  assert.ok(sequence.findIndex(x => x.action === 'reinicio') > 0, 'el reset se registra después del backup previo');
+  console.log('PASS restauración/import/reset aislados: backup previo -> registro -> operación; A -> B -> A verificado.');
 }
 
 main().catch(error => { console.error('FAIL restauración aislada:', error); process.exitCode = 1; });

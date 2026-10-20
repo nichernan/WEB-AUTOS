@@ -74,15 +74,35 @@ async function main() {
   memory.set('paginaToto:auth', 'preserve-auth-session');
   const context = {
     window: { addEventListener() {}, setTimeout, clearTimeout },
+    document: { addEventListener() {}, body: null, hidden: false },
     navigator: { onLine: true }, localStorage: { getItem: k => memory.get(k) || null, setItem: (k,v) => memory.set(k,String(v)), removeItem: k => memory.delete(k) },
-    Intl, Date, Math, JSON, console, setTimeout, clearTimeout
+    Intl, Date, Math, JSON, console, setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}
   };
   context.App = {
     auth: { enabled: true, profile: { id: 'test-user' } },
     ui: { confirm: () => { events.push({ kind: 'confirm' }); return Promise.resolve(true); }, toast() {} }
   };
   context.App.data = { deliveryReady: () => true, safetyAvailable: () => true };
-  context.App.sb = { from: table => new Query(table), channel: () => ({ on() { return this; }, subscribe() { return this; } }), removeChannel() {} };
+  const backupStatus = { generation: 'isolated-generation', revision: 0, verified_revision: 0, dirty_since: null, latest_snapshot_id: null, latest_snapshot_at: null, needs_backup: false, blocked: false };
+  context.App.sb = {
+    from: table => new Query(table),
+    rpc: (name, args) => {
+      if (name === 'app_backup_status') return Promise.resolve({ data: { ...backupStatus }, error: null });
+      if (name === 'app_create_verified_snapshot') {
+        const state = {
+          vehicles: rows.vehicles.map(x => x.data), history: rows.history.map(x => x.data),
+          reminders: rows.reminders.map(x => x.data), fixedExpenses: rows.fixed_expenses.map(x => x.data),
+          settings: {}, meta: {}, trash: []
+        };
+        const id = 'snapshot-fixture-' + rows.app_snapshots.length;
+        rows.app_snapshots.push({ id, label: args.p_label, state, source: args.p_source, created_at: new Date().toISOString(), generation: 'isolated-generation' });
+        events.push({ kind: 'snapshot', label: args.p_label, vehicles: state.vehicles.length, source: args.p_source });
+        return Promise.resolve({ data: { status: 'saved', revision: args.p_expected_revision, snapshot_id: id }, error: null });
+      }
+      return Promise.resolve({ data: null, error: { message: 'RPC desconocido: ' + name } });
+    },
+    channel: () => ({ on() { return this; }, subscribe() { return this; } }), removeChannel() {}
+  };
   vm.createContext(context);
   const source = path.join(__dirname, '..', 'PaginaToto-CODIGO-FUENTE', 'js');
   vm.runInContext(fs.readFileSync(path.join(source, 'store.js'), 'utf8'), context);

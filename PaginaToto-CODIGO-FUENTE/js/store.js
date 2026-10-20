@@ -69,11 +69,10 @@
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { state = emptyState(); save(); takeSnapshot(); return; }
+      if (!raw) { state = emptyState(); save(); return; }
       var parsed = JSON.parse(raw);
       state = migrate(parsed);
       safetyBaseline = deepClone(state);
-      takeSnapshot();   // copia local diaria; las copias no se recortan por antigüedad
     } catch (err) {
       console.error('No se pudo cargar el estado, se inicia vacío:', err);
       state = emptyState();
@@ -322,6 +321,12 @@
       listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
       return;
     }
+    if (App.auth && App.auth.enabled && App.data && App.data.backupWritesBlocked && App.data.backupWritesBlocked()) {
+      if (safetyBaseline) state = deepClone(safetyBaseline);
+      App.ui && App.ui.toast('Los cambios están pausados hasta completar la copia de seguridad. Podés seguir consultando la información.', 'error');
+      listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+      return;
+    }
     save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
   function safetyReady(action) {
@@ -331,6 +336,10 @@
     }
     if (remoteSafetyMissing()) {
       App.ui && App.ui.toast('Esta acción está bloqueada hasta aplicar la migración SUPABASE/2-seguridad-y-recuperacion.sql.', 'error');
+      return false;
+    }
+    if (App.auth && App.auth.enabled && App.data && App.data.backupWritesBlocked && App.data.backupWritesBlocked()) {
+      App.ui && App.ui.toast('Esta acción queda pausada hasta completar la copia de seguridad.', 'error');
       return false;
     }
     return true;

@@ -58,11 +58,15 @@ Permisos efectivos: usuarios autenticados activos pueden consultar `audit_log`; 
 
 Cada snapshot completo contiene el estado comercial producido por el store: `vehicles` (incluidos datos anidados), `history`, `reminders`, `fixedExpenses`, `settings`, `meta` y `trash`. No contiene perfiles ni credenciales.
 
-Después de una sincronización correcta, `sync.js` busca el snapshot `daily` del día de negocio en `America/Argentina/Buenos_Aires`. Si no existe crea uno; el índice único en `snapshot_day` bloquea duplicados concurrentes. El día se calcula en la misma zona horaria en cliente y PostgreSQL. También se crean copias explícitas antes de importar, reiniciar, restaurar y enviar una operación de sincronización masiva.
+Los respaldos automáticos remotos se crean después de diez minutos sin cambios comerciales confirmados en PostgreSQL. Abrir la aplicación, consultar o sincronizar sin DML no genera snapshots. Los cambios se agrupan por una revisión persistente por generación; la función SQL toma los datos directamente de Supabase en una transacción, guarda el snapshot y marca como verificada únicamente esa revisión. Un cambio concurrente posterior deja una revisión pendiente y exige otro respaldo. El snapshot automático usa `source='activity'`; el índice de snapshots `daily` y los snapshots históricos existentes se conservan, pero ya no se crean copias diarias al abrir la aplicación.
+
+Una tabla privada `app_private.backup_state` conserva revisión actual, revisión respaldada, hora del último cambio y snapshot verificado. Triggers en `vehicles`, `history`, `reminders`, `fixed_expenses`, `kv` y `app_trash` marcan cambios confirmados. Una función RPC de estado permite a cada pestaña y dispositivo detectar pendientes al abrir, al volver a primer plano, al reconectar y mediante consulta periódica. La creación de actividad valida en PostgreSQL que hayan pasado los diez minutos completos. La revisión funciona como clave idempotente: dos clientes que solicitan la misma revisión sólo producen una copia.
+
+Si el snapshot automático falla, la página muestra un aviso persistente con un botón de reintento, permite consultar las pantallas y revierte nuevas mutaciones locales. Si pasan diez minutos sin que la copia se verifique, triggers de escritura también bloquean cambios en PostgreSQL. El estado pendiente persiste en Supabase, por lo que al reiniciar un navegador se reanuda el respaldo; un fallo local se conserva en `localStorage` por generación. Al recuperar Internet, el sistema verifica el estado remoto y reintenta si ya venció el período. Restaurar, importar, resetear y confirmar sincronizaciones masivas siguen creando snapshots obligatorios antes de mutar el estado, sin esperar el debounce.
 
 Al restaurar, primero se inserta `Estado anterior a restauración` y luego se registra la operación. Si la copia o el registro obligatorio falla, se cancela el cambio. Después se aplica el estado seleccionado mediante el flujo normal de diferencias; los triggers auditan cada INSERT/UPDATE/DELETE y nunca se restauran usuarios o credenciales.
 
-No existe expiración ni job que borre automáticamente auditoría, papelera, operaciones o snapshots. La retención depende del almacenamiento disponible en Supabase; snapshots diarios crecen aproximadamente como 365 veces el tamaño del estado JSON por año.
+No existe expiración ni job que borre automáticamente auditoría, papelera, operaciones o snapshots. La retención depende del almacenamiento disponible en Supabase. El nuevo volumen crece según el número de períodos de actividad separados por diez minutos, más copias explícitas de seguridad; cada snapshot guarda el estado comercial completo. Los snapshots de actividad se evitan cuando no hay cambios y no se duplica una revisión ya respaldada.
 
 ## Sincronización y generación de entrega
 
@@ -70,7 +74,7 @@ Al instalar la nueva generación, el cliente compara `paginaToto:businessGenerat
 
 Los triggers y RLS exigen la generación vigente en JSON de vehículos, historial, recordatorios y gastos fijos; `kv` usa una columna `generation`. Esto impide que una versión vieja o una sincronización offline reinserte datos previos aun si conserva su `localStorage`. También impide leer o modificar filas de otras generaciones desde la API.
 
-La barrera masiva de `sync.js` se calcula según el tamaño real del shadow remoto: en tablas de hasta 3 filas bloquea borrar todo o actualizar todas; desde 3 filas pide confirmación para altas en lote; en tablas mayores usa como umbral el máximo entre 3 y la mitad redondeada hacia arriba para borrados o upserts. Antes de enviar esos cambios guarda el shadow remoto como snapshot, confirma el `app_operations` y solo entonces manda las mutaciones. Si falla el backup o el log, no manda el lote. Una sincronización correcta crea el snapshot diario después del envío; ese punto diario no sustituye al backup previo.
+La barrera masiva de `sync.js` se calcula según el tamaño real del shadow remoto. Antes de enviar cambios peligrosos guarda el estado remoto mediante la función transaccional y verifica el snapshot, registra `app_operations` y sólo entonces manda las mutaciones. Si falla el backup o el log, no manda el lote. Para cambios habituales, los triggers marcan la revisión remota y el respaldo comienza después de diez minutos de inactividad; no se hace copia por cada escritura.
 
 ## RLS y límites
 
@@ -95,3 +99,11 @@ No se hizo una autenticación interactiva contra el usuario real: no se proporci
 Migraciones instaladas: `2-seguridad-y-recuperacion.sql`, `3-endurecer-permisos-auth.sql`, `4-kv-generation-guard.sql`. Limpieza guardada y ejecutada: `5-entrega-inicial-vacia.sql`; aborta si los conteos no coinciden.
 
 Cambios de app: `js/store.js`, `js/sync.js`, `js/views2.js`, estilos, README y versiones de caché. Se regeneraron `PaginaToto-WEB/index.html` y `PaginaToto.html` desde las fuentes con `scripts/build-inline-bundles.js`.
+
+## Actualización — copias automáticas por cambios (20/10/2026)
+
+Se aplicó la migración aditiva `20261020181341_auto_backup_on_commercial_changes` únicamente al proyecto `wprhqjmhsqwncbhouxvl`. No insertó ni actualizó filas comerciales o snapshots. Los conteos de solo lectura antes y después coincidieron: vehículos 2, historial 16, recordatorios 0, gastos fijos 0, `kv` 1 (`meta`), papelera 0, snapshots 6, operaciones 2, auditoría 53, Auth 1 y perfiles 1. La generación activa se conservó. El nuevo `backup_state` comienza en revisión 0/0 y no produce una copia por instalarse o abrir la app.
+
+La migración agrega 17 triggers de seguimiento y barrera, una tabla privada de revisión, y RPC autenticadas para consultar estado y crear snapshots consistentes desde PostgreSQL. Los RPC solo son ejecutables por `authenticated`; `anon` no puede llamarlos y el estado privado no tiene permisos de lectura para clientes. El asesor de seguridad quedó igual que antes: el aviso preexistente `Leaked Password Protection Disabled`; no se cambió Auth.
+
+Suite PostgreSQL aislada y Node: PASS. Incluyó espera de diez minutos controlada por servidor, ausencia de duplicados sin cambios, rechazo de una revisión temprana/obsoleta, snapshot completo sin perfiles, bloqueo tras fallo, reintento, carrera real entre dos conexiones PostgreSQL, reanudación entre clientes, reconexión online, importación, reset, restauración y backup antes de lote. Todos los registros de prueba se revirtieron o quedaron en un PostgreSQL descartable.

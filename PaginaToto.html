@@ -599,6 +599,15 @@ body.modal-open { overflow: hidden; }
 .modal-foot { padding: 14px 18px; border-top: 1px solid var(--c-border); display: flex; justify-content: flex-end; gap: 9px; }
 .confirm-text { font-size: .92rem; color: var(--c-text-soft); }
 
+/* Bloqueo recuperable: permite consultar la aplicación mientras el backup falla. */
+.backup-lock-overlay { position: fixed; z-index: 10000; inset: max(12px, env(safe-area-inset-top, 0px)) 12px auto; display: flex; justify-content: center; pointer-events: none; }
+.backup-lock-card { width: min(100%, 460px); max-height: calc(100vh - 24px); overflow-y: auto; padding: 20px; border: 1px solid var(--c-border); border-radius: 16px; background: var(--c-surface); color: var(--c-text); box-shadow: var(--shadow-lg); pointer-events: auto; }
+.backup-lock-card h2 { margin: 0 0 12px; font-size: 1.15rem; }
+.backup-lock-message { color: var(--c-text-soft); line-height: 1.5; }
+.backup-lock-state { min-height: 1.25em; color: var(--c-danger); font-size: .9rem; }
+.backup-lock-button { width: 100%; min-height: 46px; border: 0; border-radius: 10px; background: var(--c-primary); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+.backup-lock-button:disabled { opacity: .65; cursor: wait; }
+
 
 /* ============================= Toasts ====================== */
 .toast-wrap { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 200; align-items: center; }
@@ -2640,11 +2649,10 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { state = emptyState(); save(); takeSnapshot(); return; }
+      if (!raw) { state = emptyState(); save(); return; }
       var parsed = JSON.parse(raw);
       state = migrate(parsed);
       safetyBaseline = deepClone(state);
-      takeSnapshot();   // copia local diaria; las copias no se recortan por antigüedad
     } catch (err) {
       console.error('No se pudo cargar el estado, se inicia vacío:', err);
       state = emptyState();
@@ -2893,6 +2901,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
       return;
     }
+    if (App.auth && App.auth.enabled && App.data && App.data.backupWritesBlocked && App.data.backupWritesBlocked()) {
+      if (safetyBaseline) state = deepClone(safetyBaseline);
+      App.ui && App.ui.toast('Los cambios están pausados hasta completar la copia de seguridad. Podés seguir consultando la información.', 'error');
+      listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
+      return;
+    }
     save(); listeners.forEach(function (fn) { try { fn(state); } catch (e) { console.error(e); } });
   }
   function safetyReady(action) {
@@ -2902,6 +2916,10 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     }
     if (remoteSafetyMissing()) {
       App.ui && App.ui.toast('Esta acción está bloqueada hasta aplicar la migración SUPABASE/2-seguridad-y-recuperacion.sql.', 'error');
+      return false;
+    }
+    if (App.auth && App.auth.enabled && App.data && App.data.backupWritesBlocked && App.data.backupWritesBlocked()) {
+      App.ui && App.ui.toast('Esta acción queda pausada hasta completar la copia de seguridad.', 'error');
       return false;
     }
     return true;
@@ -5880,6 +5898,15 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   var approvedMassChangeFingerprint = null;
   var pendingMassSync = null;
   var pendingBulkOperation = null;
+  var backupAvailable = false;
+  var backupStatus = null;
+  var backupTimer = null;
+  var backupPollTimer = null;
+  var backupAttempting = false;
+  var backupBlocked = false;
+  var backupBlockMessage = '';
+  var backupOverlay = null;
+  var BACKUP_FAILURE_KEY = 'paginaToto:backupFailure';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function j(o) { return JSON.stringify(o); }
@@ -5897,7 +5924,11 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     })).then(function (rs) {
       safetyAvailable = rs.every(function (r) { return !r.error; });
       if (!safetyAvailable) console.warn('Auditoría/papelera/snapshots remotos requieren aplicar SUPABASE/2-seguridad-y-recuperacion.sql.');
-    }).catch(function () { safetyAvailable = false; });
+      return sb.rpc('app_backup_status').then(function (r) {
+        backupAvailable = safetyAvailable && !r.error;
+        if (!backupAvailable) console.warn('Falta la migración de snapshots automáticos por cambios.');
+      });
+    }).catch(function () { safetyAvailable = false; backupAvailable = false; });
   }
 
   function loadAll() {
@@ -6008,7 +6039,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
         offlineMode = false;
       }
       subscribe();
-      if (safetyAvailable) return flush(store.getState());
+      if (safetyAvailable) return flush(store.getState()).then(function () { return refreshBackupStatus(); });
     });
   }
 
@@ -6105,6 +6136,144 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     if (!navigator.onLine || offlineMode) { offlineMode = true; return; }
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { flush(state); }, 400);
+  }
+
+  function backupFailureMessage() {
+    return 'Los últimos cambios todavía no tienen una copia de seguridad verificada. Para proteger tu información, necesitamos completar el respaldo.';
+  }
+  function showBackupFailure(message) {
+    backupBlocked = true;
+    backupBlockMessage = message || '';
+    try { localStorage.setItem(BACKUP_FAILURE_KEY, JSON.stringify({ generation: businessGeneration, at: Date.now(), message: backupBlockMessage })); } catch (e) {}
+    if (!document || !document.body) return;
+    if (!backupOverlay) {
+      backupOverlay = document.createElement('div'); backupOverlay.className = 'backup-lock-overlay';
+      backupOverlay.setAttribute('role', 'alert');
+      var box = document.createElement('section'); box.className = 'backup-lock-card';
+      var title = document.createElement('h2'); title.textContent = 'No se pudo guardar la copia de seguridad';
+      var body = document.createElement('p'); body.className = 'backup-lock-message'; body.textContent = backupFailureMessage();
+      var state = document.createElement('p'); state.className = 'backup-lock-state';
+      var button = document.createElement('button'); button.type = 'button'; button.className = 'backup-lock-button';
+      button.textContent = 'Reintentar copia de seguridad';
+      button.addEventListener('click', retryBackup);
+      box.appendChild(title); box.appendChild(body); box.appendChild(state); box.appendChild(button); backupOverlay.appendChild(box);
+      backupOverlay._state = state; backupOverlay._button = button; backupOverlay._body = body;
+      document.body.appendChild(backupOverlay);
+    }
+    backupOverlay._state.textContent = !navigator.onLine
+      ? 'Necesitás recuperar Internet para completar el respaldo.'
+      : (backupBlockMessage ? 'No se pudo confirmar el respaldo. Reintentá para proteger los últimos cambios.' : '');
+    backupOverlay._button.disabled = backupAttempting;
+  }
+  function clearBackupFailure() {
+    backupBlocked = false; backupBlockMessage = '';
+    try { localStorage.removeItem(BACKUP_FAILURE_KEY); } catch (e) {}
+    if (backupOverlay) { backupOverlay.remove(); backupOverlay = null; }
+  }
+  function applyBackupStatus(status) {
+    if (!status || typeof status !== 'object') throw new Error('Supabase no devolvió el estado del respaldo.');
+    if (status.generation && businessGeneration && status.generation !== businessGeneration) throw new Error('La generación del respaldo no coincide con la sesión actual.');
+    backupStatus = status;
+    if (!status.needs_backup) {
+      if (backupTimer) clearTimeout(backupTimer);
+      backupTimer = null;
+      clearBackupFailure();
+    }
+    else {
+      if (status.blocked) showBackupFailure('El respaldo está pendiente desde hace más de diez minutos.');
+      var localFailure = null;
+      try { localFailure = JSON.parse(localStorage.getItem(BACKUP_FAILURE_KEY) || 'null'); } catch (e) {}
+      if (localFailure && localFailure.generation === businessGeneration) {
+        backupBlocked = true; backupBlockMessage = localFailure.message || 'falló el respaldo'; showBackupFailure(backupBlockMessage);
+      }
+      scheduleBackup(status);
+    }
+    return status;
+  }
+  function fetchBackupStatus() {
+    if (!backupAvailable || !generationReady || !businessGeneration) return Promise.reject(new Error('El respaldo automático no está disponible.'));
+    return sb.rpc('app_backup_status').then(function (r) { if (r.error) throw r.error; return applyBackupStatus(r.data); });
+  }
+  function refreshBackupStatus() {
+    if (!navigator.onLine || !generationReady) return Promise.resolve(null);
+    if (!backupAvailable) { showBackupFailure('El servicio de copias automáticas no está disponible.'); return Promise.resolve(null); }
+    return fetchBackupStatus().catch(function (e) {
+      console.warn('No se pudo consultar el estado del backup', e);
+      if (backupStatus && backupStatus.needs_backup) showBackupFailure(e.message || 'Error al consultar el respaldo');
+      return null;
+    });
+  }
+  function scheduleBackup(status) {
+    if (backupTimer) clearTimeout(backupTimer);
+    backupTimer = null;
+    if (backupAttempting || !status || !status.needs_backup || !status.dirty_since) return;
+    var dueAt = new Date(status.dirty_since).getTime() + 10 * 60 * 1000;
+    backupTimer = setTimeout(function () { return attemptAutomaticBackup(); }, Math.max(0, dueAt - Date.now()));
+  }
+  function createVerifiedSnapshot(revision, label, source, onlyIfPending) {
+    return sb.rpc('app_create_verified_snapshot', { p_expected_revision: revision, p_label: label,
+      p_source: source, p_only_if_pending: !!onlyIfPending }).then(function (r) {
+      if (r.error) throw r.error;
+      if (!r.data || ['saved','already_saved'].indexOf(r.data.status) < 0) return r.data || { status: 'stale' };
+      return r.data;
+    });
+  }
+  function attemptAutomaticBackup() {
+    if (backupAttempting || !navigator.onLine || !backupAvailable || !generationReady) return Promise.resolve(false);
+    backupAttempting = true;
+    return fetchBackupStatus().then(function (status) {
+      if (!status.needs_backup) return status;
+      return createVerifiedSnapshot(Number(status.revision), 'Copia automática tras cambios', 'activity', true).then(function (result) {
+        if (result.status === 'stale') return fetchBackupStatus();
+        return fetchBackupStatus();
+      });
+    }).then(function (status) {
+      backupAttempting = false;
+      if (status && status.needs_backup) scheduleBackup(status);
+      return !!(status && !status.needs_backup);
+    }).catch(function (e) {
+      backupAttempting = false;
+      showBackupFailure(e.message || 'No se pudo verificar el snapshot remoto.');
+      if (backupOverlay) backupOverlay._button.disabled = false;
+      return false;
+    });
+  }
+  function retryBackup() {
+    if (backupAttempting) return Promise.resolve(false);
+    if (!navigator.onLine) { showBackupFailure('Sin conexión a Internet'); return Promise.resolve(false); }
+    backupAttempting = true;
+    if (backupOverlay) backupOverlay._button.disabled = true;
+    return fetchBackupStatus().then(function (status) {
+      if (!status.needs_backup) return status;
+      return createVerifiedSnapshot(Number(status.revision), 'Copia automática tras cambios', 'activity', true).then(function (result) {
+        if (result.status === 'stale') return fetchBackupStatus();
+        return fetchBackupStatus();
+      });
+    }).then(function (status) {
+      backupAttempting = false;
+      if (status && !status.needs_backup) clearBackupFailure();
+      else if (status) scheduleBackup(status);
+      return !!(status && !status.needs_backup);
+    }).catch(function (e) {
+      backupAttempting = false;
+      backupBlockMessage = e.message || 'falló el respaldo';
+      showBackupFailure(backupBlockMessage);
+      if (backupOverlay) backupOverlay._button.disabled = false;
+      return false;
+    });
+  }
+  function startBackupMonitoring() {
+    if (backupPollTimer) clearInterval(backupPollTimer);
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(BACKUP_FAILURE_KEY) || 'null'); } catch (e) {}
+    if (saved && saved.generation === businessGeneration) { backupBlocked = true; backupBlockMessage = saved.message || ''; showBackupFailure(backupBlockMessage); }
+    refreshBackupStatus().then(function (status) {
+      if (!status) return;
+      if (status.needs_backup && (status.blocked || (backupBlocked && Date.now() >= new Date(status.dirty_since).getTime() + 10 * 60 * 1000))) attemptAutomaticBackup();
+    });
+    backupPollTimer = setInterval(function () { refreshBackupStatus().then(function (status) {
+      if (status && status.needs_backup && Date.now() >= new Date(status.dirty_since).getTime() + 10 * 60 * 1000) attemptAutomaticBackup();
+    }); }, 60000);
   }
 
   function diffArr(table, cur, old, ops, tsField) {
@@ -6287,7 +6456,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       if (ops.del[t].length) promises.push(sb.from(t).delete().in(key, ops.del[t]));
     });
     if (!promises.length) {
-      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return ensureCloudDailySnapshot(state); }).then(function () { return true; }).catch(function (e) {
+      return syncTrash(state.trash || [], shadow.trash || []).then(function () { shadow = clone(state); saveBase(state); clearPendingMassSync(); clearPendingBulkOperation(); return refreshBackupStatus(); }).then(function () { return true; }).catch(function (e) {
         console.error('sync safety flush', e); offlineMode = true;
         App.ui && App.ui.toast('No se pudo guardar la papelera en la nube. Revisá internet.', 'error');
         if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(reconnect, 8000);
@@ -6305,7 +6474,7 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       saveBase(state);
       clearPendingMassSync();
       clearPendingBulkOperation();
-      return ensureCloudDailySnapshot(state).then(function () { return true; });
+      return refreshBackupStatus().then(function () { return true; });
     }).catch(function (e) {
       console.error('sync flush', e);
       offlineMode = true;
@@ -6339,15 +6508,13 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
   function saveSnapshot(snap) {
     if (!safetyAvailable) return Promise.reject(new Error('Migración de seguridad pendiente.'));
     if (!generationReady || !businessGeneration) return Promise.reject(new Error('No hay una etapa comercial activa.'));
-    var uid = App.auth && App.auth.profile && App.auth.profile.id;
-    var state = JSON.parse(snap.data);
-    var source = snap.source || 'application';
-    var payload = { created_at: new Date(snap.ts).toISOString(), label: snap.etiqueta || 'Estado completo',
-      created_by: uid || null, state: state, summary: snapshotSummary(state), source: source, generation: businessGeneration };
-    return sb.from('app_snapshots').insert(payload).then(function (r) {
-      if (r.error && source === 'daily' && (r.error.code === '23505' || /duplicate key/i.test(r.error.message || ''))) return true;
-      if (r.error) throw r.error;
-      return true;
+    if (!backupAvailable) return Promise.reject(new Error('No está instalada la migración de respaldos automáticos.'));
+    var source = snap.source === 'safety' ? 'safety' : 'application';
+    return fetchBackupStatus().then(function (status) {
+      return createVerifiedSnapshot(Number(status.revision), snap.etiqueta || 'Estado completo', source, false);
+    }).then(function (result) {
+      if (!result || result.status !== 'saved') throw new Error('No se pudo confirmar la persistencia del snapshot.');
+      return refreshBackupStatus().then(function () { return true; });
     });
   }
   function saveSnapshotState(state, label, source) {
@@ -6366,14 +6533,9 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
       .then(function (r) { if (r.error) throw r.error; return r.data; });
   }
   function ensureCloudDailySnapshot(state) {
-    if (!safetyAvailable) return Promise.resolve(false);
-    var day = businessDateKey(new Date());
-    return sb.from('app_snapshots').select('id').eq('source', 'daily').eq('snapshot_day', day).limit(1)
-      .then(function (r) {
-        if (r.error) throw r.error;
-        if (r.data && r.data.length) return false;
-        return saveSnapshotState(state, 'Estado diario', 'daily').then(function () { return true; });
-      }).then(function (created) { if (created) console.info('Punto diario de restauración creado.'); return created; });
+    // Los snapshots automáticos ahora se disparan por actividad confirmada,
+    // no por apertura ni por sincronizaciones sin DML.
+    return Promise.resolve(false);
   }
   function fetchAudit(offset, operationOffset) {
     if (!safetyAvailable) return Promise.reject(new Error('Aplicá primero la migración SQL de seguridad.'));
@@ -6548,6 +6710,12 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
         pendingMassSync = readPendingMassSync();
         pendingBulkOperation = readPendingBulkOperation();
         if (!pendingBulkOperation && pendingMassSync && pendingMassSync.bulkOperation) pendingBulkOperation = pendingMassSync.bulkOperation;
+        try {
+          var backupFailure = JSON.parse(localStorage.getItem(BACKUP_FAILURE_KEY) || 'null');
+          if (backupFailure && backupFailure.generation === localGeneration) {
+            backupBlocked = true; backupBlockMessage = backupFailure.message || ''; showBackupFailure(backupBlockMessage);
+          }
+        } catch (e) {}
         store.load();
       }
       offlineMode = true;
@@ -6571,8 +6739,20 @@ App.assets.logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDcAAALsCAYAAAD
     saveSnapshot: saveSnapshot,
     restoreRemoteSnapshot: restoreRemoteSnapshot,
     logOperation: logOperation,
-    markBulkOperation: markBulkOperation
+    markBulkOperation: markBulkOperation,
+    backupWritesBlocked: function () { return !!(App.auth && App.auth.enabled && (backupBlocked || (backupStatus && backupStatus.blocked) || (!offlineMode && !backupAvailable))); }
   };
+
+  App.data.backupStatus = function () { return backupStatus; };
+  App.data.retryBackup = retryBackup;
+  App.data.backupAvailable = function () { return backupAvailable; };
+  startBackupMonitoring();
+  window.addEventListener('online', function () { refreshBackupStatus().then(function (status) {
+    if (status && status.needs_backup && (status.blocked || backupBlocked || Date.now() >= new Date(status.dirty_since).getTime() + 10 * 60 * 1000)) attemptAutomaticBackup();
+  }); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshBackupStatus().then(function (status) {
+    if (status && status.needs_backup && Date.now() >= new Date(status.dirty_since).getTime() + 10 * 60 * 1000) attemptAutomaticBackup();
+  }); });
 })();
 </script>
 <script>
